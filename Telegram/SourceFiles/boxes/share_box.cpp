@@ -66,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // AyuGram includes
 #include "ayu/features/forward/ayu_forward.h"
 
+constexpr auto kForwardMessagesPerRequest = 100;
 
 class ShareBox::Inner final : public Ui::RpWidget {
 public:
@@ -1813,13 +1814,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				? nullptr
 				: thread->maybeSublistPeer();
 			const auto fromPeer = history->peer;
-			const auto msgCount = int(existingIds.size());
-			const auto starsPaid = std::min(
-				peer->starsPerMessageChecked(),
-				options.starsApproved);
-			if (starsPaid) {
-				options.starsApproved -= starsPaid;
-			}
+			auto starsApproved = options.starsApproved;
 			const auto sendFlags = commonSendFlags
 				| (ShouldSendSilent(peer, options)
 					? Flag::f_silent
@@ -1827,11 +1822,12 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				| (options.shortcutId
 					? Flag::f_quick_reply_shortcut
 					: Flag(0))
-				| (starsPaid ? Flag::f_allow_paid_stars : Flag())
 				| (sublistPeer ? Flag::f_reply_to : Flag())
 				| (options.suggest ? Flag::f_suggested_post : Flag())
 				| (options.effectId ? Flag::f_effect : Flag());
 			auto buildMessage = [=](
+					const QVector<MTPint> &ids,
+					int starsPaid,
 					not_null<History*> history,
 					FullReplyTo replyTo)
 				-> Data::Histories::PreparedMessage {
@@ -1847,14 +1843,17 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				} else {
 					flags &= ~Flag::f_top_msg_id;
 				}
-				auto randoms = QVector<MTPlong>(msgCount);
+				if (starsPaid) {
+					flags |= Flag::f_allow_paid_stars;
+				}
+				auto randoms = QVector<MTPlong>(ids.size());
 				for (auto &value : randoms) {
 					value = base::RandomValue<MTPlong>();
 				}
 				return MTPmessages_ForwardMessages(
 					MTP_flags(flags),
 					fromPeer->input(),
-					MTP_vector<MTPint>(mtpMsgIds),
+					MTP_vector<MTPint>(ids),
 					MTP_vector<MTPlong>(randoms),
 					history->peer->input(),
 					MTP_int(realTopMsgId),
@@ -1921,21 +1920,40 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					}
 				}
 			};
-			const auto requestKey = ++state->nextRequestKey;
-			state->requests.insert(requestKey);
-			histories.sendPreparedMessage(
-				threadHistory,
-				FullReplyTo{ .topicRootId = topicRootId },
-				uint64(0),
-				std::move(buildMessage),
-				[=](const MTPUpdates &updates,
-						const MTP::Response &) {
-					requestDone(updates, requestKey);
-				},
-				[=](const MTP::Error &error,
-						const MTP::Response &) {
-					requestFail(error, requestKey);
-				});
+			for (auto offset = 0; offset < mtpMsgIds.size();
+					offset += kForwardMessagesPerRequest) {
+				const auto count = std::min(
+					kForwardMessagesPerRequest,
+					mtpMsgIds.size() - offset);
+				const auto batchIds = mtpMsgIds.mid(offset, count);
+				const auto starsPaid = std::min(
+					int(batchIds.size() * peer->starsPerMessageChecked()),
+					starsApproved);
+				if (starsPaid) {
+					starsApproved -= starsPaid;
+				}
+				const auto requestKey = ++state->nextRequestKey;
+				state->requests.insert(requestKey);
+				histories.sendPreparedMessage(
+					threadHistory,
+					FullReplyTo{ .topicRootId = topicRootId },
+					uint64(0),
+					[=](not_null<History*> history, FullReplyTo replyTo) {
+						return buildMessage(
+							batchIds,
+							starsPaid,
+							history,
+							replyTo);
+					},
+					[=](const MTPUpdates &updates,
+							const MTP::Response &) {
+						requestDone(updates, requestKey);
+					},
+					[=](const MTP::Error &error,
+							const MTP::Response &) {
+						requestFail(error, requestKey);
+					});
+			}
 		}
 		if (state->requests.empty()) {
 			if (show->valid()) {

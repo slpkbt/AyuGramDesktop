@@ -38,13 +38,14 @@ We will be glad to see you among SleepyGram users.
 
 ## Downloads
 
-Release builds will be published on the [Releases](https://github.com/slpkbt/SleepyGram/releases) page.
+Linux and macOS builds are published automatically on the [Releases](https://github.com/slpkbt/SleepyGram/releases) page after `dev` builds and version tag builds.
 
-GitHub Actions also builds CI artifacts:
+GitHub Actions builds these automatic artifacts:
 
-- `SleepyGram-windows-x64.zip`
 - `SleepyGram-linux-x64.tar.xz`
 - `SleepyGram-macos-x64.zip`
+
+Windows builds are manual-only through `workflow_dispatch`.
 
 CI artifacts do not publish auto-update packages.
 
@@ -60,7 +61,15 @@ SleepyGram uses separate application identifiers, executable names, and data dir
 
 ## Building
 
-Use `.github/workflows/build.yml` to build Windows, Linux, and macOS artifacts.
+Use `.github/workflows/build.yml` to build artifacts.
+
+Automatic builds:
+
+- pull requests: Linux and macOS checks
+- pushes to `dev`: Linux and macOS builds uploaded to the rolling `continuous` prerelease
+- `v*` tags: Linux and macOS builds uploaded to the matching GitHub Release
+
+Manual builds can target Linux, macOS, Windows, or all platforms. Windows is never built automatically.
 
 Preferred Telegram API credential secrets:
 

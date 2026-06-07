@@ -38,13 +38,14 @@ SleepyGram появился потому, что AyuGram медленно обн
 
 ## Скачать
 
-Готовые сборки будут публиковаться на странице [Releases](https://github.com/slpkbt/SleepyGram/releases).
+Linux и macOS сборки автоматически публикуются на странице [Releases](https://github.com/slpkbt/SleepyGram/releases) после сборок `dev` и версионных тегов.
 
-GitHub Actions также собирает CI artifacts:
+GitHub Actions автоматически собирает:
 
-- `SleepyGram-windows-x64.zip`
 - `SleepyGram-linux-x64.tar.xz`
 - `SleepyGram-macos-x64.zip`
+
+Windows собирается только вручную через `workflow_dispatch`.
 
 CI artifacts не публикуют auto-update packages.
 
@@ -60,7 +61,15 @@ SleepyGram использует отдельные application ids, имя би�
 
 ## Сборка
 
-Для сборки Windows, Linux и macOS artifacts используется `.github/workflows/build.yml`.
+Для сборки artifacts используется `.github/workflows/build.yml`.
+
+Автоматические сборки:
+
+- pull requests: Linux и macOS checks
+- push в `dev`: Linux и macOS сборки загружаются в rolling prerelease `continuous`
+- теги `v*`: Linux и macOS сборки загружаются в соответствующий GitHub Release
+
+Ручной запуск может собрать Linux, macOS, Windows или все платформы. Windows автоматически не собирается.
 
 Основные Telegram API credential secrets:
 

@@ -2,24 +2,204 @@ name: Build SleepyGram
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        required: true
+        default: linux-macos
+        type: choice
+        options:
+          - linux-macos
+          - linux-x64
+          - macos-x64
+          - windows-x64
+          - all
+      publish_release:
+        description: Upload built artifacts to a GitHub Release
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Release tag for manual publishing
+        required: false
+        default: manual
+        type: string
   pull_request:
+    branches:
+      - dev
   push:
     branches:
-      - sync-telegram-6.8.2-sleepygram-actions
       - dev
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.AYUGRAM_API_ID || secrets.TELEGRAM_API_ID || secrets.API_ID || '2040' }}
+  TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.AYUGRAM_API_HASH || secrets.TELEGRAM_API_HASH || secrets.API_HASH || 'b18441a1ff607e10a989891a5462e627' }}
 
 jobs:
+  linux-x64:
+    name: linux-x64
+    runs-on: ubuntu-22.04
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platform == 'linux-macos' || inputs.platform == 'linux-x64' || inputs.platform == 'all' }}
+    env:
+      IMAGE_TAG: sleepygram:centos_env
+    steps:
+      - name: Check API credentials
+        run: |
+          if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
+            echo "::error::Missing API credentials. Add TDESKTOP_API_ID/TDESKTOP_API_HASH or reuse AyuGram credentials as AYUGRAM_API_ID/AYUGRAM_API_HASH, TELEGRAM_API_ID/TELEGRAM_API_HASH, or API_ID/API_HASH."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Prepare Dockerfile
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          export PATH="$HOME/.local/bin:$PATH"
+          cd Telegram/build/docker/centos_env
+          poetry install
+          DOCKERFILE="$(DEBUG= LTO= poetry run gen_dockerfile)"
+          printf '%s\n' "$DOCKERFILE" > Dockerfile
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: linux-x64-buildx-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+          restore-keys: linux-x64-buildx-
+
+      - name: Prepare libraries
+        uses: docker/build-push-action@v6
+        with:
+          context: Telegram/build/docker/centos_env
+          load: true
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+
+      - name: Move Docker cache
+        run: |
+          rm -rf "${{ runner.temp }}/.buildx-cache"
+          mv "${{ runner.temp }}/.buildx-cache-new" "${{ runner.temp }}/.buildx-cache"
+
+      - name: Build
+        run: |
+          docker run --rm \
+            -u "$(id -u)" \
+            -v "$PWD:/usr/src/tdesktop" \
+            -e CONFIG=Release \
+            "$IMAGE_TAG" \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+              -D CMAKE_CONFIGURATION_TYPES=Release \
+              -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
+              -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
+              -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+              -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+      - name: Package
+        run: |
+          test -f out/Release/SleepyGram || { echo "::error::Smoke check failed: SleepyGram not found"; exit 1; }
+          test -f out/Release/Updater || { echo "::error::Smoke check failed: Updater not found"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/sleepygram-linux-x64"
+          cp out/Release/SleepyGram out/Release/Updater "$RUNNER_TEMP/sleepygram-linux-x64/"
+          tar -C "$RUNNER_TEMP/sleepygram-linux-x64" -cJf "$RUNNER_TEMP/SleepyGram-linux-x64.tar.xz" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SleepyGram-linux-x64.tar.xz
+          path: ${{ runner.temp }}/SleepyGram-linux-x64.tar.xz
+          if-no-files-found: error
+
+  macos-x64:
+    name: macos-x64
+    runs-on: macos-13
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platform == 'linux-macos' || inputs.platform == 'macos-x64' || inputs.platform == 'all' }}
+    steps:
+      - name: Check API credentials
+        run: |
+          if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
+            echo "::error::Missing API credentials. Add TDESKTOP_API_ID/TDESKTOP_API_HASH or reuse AyuGram credentials as AYUGRAM_API_ID/AYUGRAM_API_HASH, TELEGRAM_API_ID/TELEGRAM_API_HASH, or API_ID/API_HASH."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: tdesktop
+
+      - name: Install tools
+        run: |
+          brew update
+          brew install automake meson nasm ninja pkg-config
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: macos-x64-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
+          restore-keys: macos-x64-libraries-
+
+      - name: Prepare libraries
+        run: ./tdesktop/Telegram/build/prepare/mac.sh silent
+
+      - name: Build
+        run: |
+          cd tdesktop/Telegram
+          ./configure.sh \
+            -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D CMAKE_OSX_ARCHITECTURES=x86_64 \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
+            -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          cmake --build ../out --config Release --parallel
+
+      - name: Package
+        run: |
+          cd tdesktop/out/Release
+          test -d SleepyGram.app || { echo "::error::Smoke check failed: SleepyGram.app not found"; exit 1; }
+          codesign --force --deep --sign - SleepyGram.app
+          codesign --verify --deep --strict SleepyGram.app
+          ditto -c -k --sequesterRsrc --keepParent SleepyGram.app "$RUNNER_TEMP/SleepyGram-macos-x64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SleepyGram-macos-x64.zip
+          path: ${{ runner.temp }}/SleepyGram-macos-x64.zip
+          if-no-files-found: error
+
   windows-x64:
     name: windows-x64
     runs-on: windows-2022
-    env:
-      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.AYUGRAM_API_ID || secrets.TELEGRAM_API_ID || secrets.API_ID || '2040' }}
-      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.AYUGRAM_API_HASH || secrets.TELEGRAM_API_HASH || secrets.API_HASH || 'b18441a1ff607e10a989891a5462e627' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'windows-x64' || inputs.platform == 'all') }}
     defaults:
       run:
         shell: pwsh
     steps:
-      - name: Check required secrets
+      - name: Check API credentials
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TDESKTOP_API_ID) -or [string]::IsNullOrWhiteSpace($env:TDESKTOP_API_HASH)) {
             Write-Error "Missing API credentials. Add TDESKTOP_API_ID/TDESKTOP_API_HASH or reuse AyuGram credentials as AYUGRAM_API_ID/AYUGRAM_API_HASH, TELEGRAM_API_ID/TELEGRAM_API_HASH, or API_ID/API_HASH."
@@ -119,155 +299,109 @@ jobs:
           path: ${{ runner.temp }}\SleepyGram-windows-x64.zip
           if-no-files-found: error
 
-  linux-x64:
-    name: linux-x64
+  publish-release:
+    name: publish-release
     runs-on: ubuntu-22.04
-    env:
-      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.AYUGRAM_API_ID || secrets.TELEGRAM_API_ID || secrets.API_ID || '2040' }}
-      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.AYUGRAM_API_HASH || secrets.TELEGRAM_API_HASH || secrets.API_HASH || 'b18441a1ff607e10a989891a5462e627' }}
-      IMAGE_TAG: sleepygram:centos_env
+    needs:
+      - linux-x64
+      - macos-x64
+      - windows-x64
+    if: ${{ always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) }}
     steps:
-      - name: Check required secrets
+      - name: Check build results
+        shell: bash
         run: |
-          if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
-            echo "::error::Missing API credentials. Add TDESKTOP_API_ID/TDESKTOP_API_HASH or reuse AyuGram credentials as AYUGRAM_API_ID/AYUGRAM_API_HASH, TELEGRAM_API_ID/TELEGRAM_API_HASH, or API_ID/API_HASH."
+          check_result() {
+            local job="$1"
+            local result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::$job did not finish successfully: $result"
+              exit 1
+            fi
+          }
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            check_result "linux-x64" "${{ needs.linux-x64.result }}"
+            check_result "macos-x64" "${{ needs.macos-x64.result }}"
+            exit 0
+          fi
+
+          case "${{ inputs.platform }}" in
+            linux-macos)
+              check_result "linux-x64" "${{ needs.linux-x64.result }}"
+              check_result "macos-x64" "${{ needs.macos-x64.result }}"
+              ;;
+            linux-x64)
+              check_result "linux-x64" "${{ needs.linux-x64.result }}"
+              ;;
+            macos-x64)
+              check_result "macos-x64" "${{ needs.macos-x64.result }}"
+              ;;
+            windows-x64)
+              check_result "windows-x64" "${{ needs.windows-x64.result }}"
+              ;;
+            all)
+              check_result "linux-x64" "${{ needs.linux-x64.result }}"
+              check_result "macos-x64" "${{ needs.macos-x64.result }}"
+              check_result "windows-x64" "${{ needs.windows-x64.result }}"
+              ;;
+          esac
+
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(release-assets/*)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No artifacts found for release upload"
             exit 1
           fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Prepare Dockerfile
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          export PATH="$HOME/.local/bin:$PATH"
-          cd Telegram/build/docker/centos_env
-          poetry install
-          DOCKERFILE="$(DEBUG= LTO= poetry run gen_dockerfile)"
-          printf '%s\n' "$DOCKERFILE" > Dockerfile
-
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          tool-cache: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: linux-x64-buildx-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
-          restore-keys: linux-x64-buildx-
-
-      - name: Prepare libraries
-        uses: docker/build-push-action@v6
-        with:
-          context: Telegram/build/docker/centos_env
-          load: true
-          tags: ${{ env.IMAGE_TAG }}
-          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
-
-      - name: Move Docker cache
-        run: |
-          rm -rf "${{ runner.temp }}/.buildx-cache"
-          mv "${{ runner.temp }}/.buildx-cache-new" "${{ runner.temp }}/.buildx-cache"
-
-      - name: Build
-        run: |
-          docker run --rm \
-            -u "$(id -u)" \
-            -v "$PWD:/usr/src/tdesktop" \
-            -e CONFIG=Release \
-            "$IMAGE_TAG" \
-            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-              -D CMAKE_CONFIGURATION_TYPES=Release \
-              -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
-              -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
-              -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
-              -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
-
-      - name: Package
-        run: |
-          test -f out/Release/SleepyGram || { echo "::error::Smoke check failed: SleepyGram not found"; exit 1; }
-          test -f out/Release/Updater || { echo "::error::Smoke check failed: Updater not found"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/sleepygram-linux-x64"
-          cp out/Release/SleepyGram out/Release/Updater "$RUNNER_TEMP/sleepygram-linux-x64/"
-          tar -C "$RUNNER_TEMP/sleepygram-linux-x64" -cJf "$RUNNER_TEMP/SleepyGram-linux-x64.tar.xz" .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SleepyGram-linux-x64.tar.xz
-          path: ${{ runner.temp }}/SleepyGram-linux-x64.tar.xz
-          if-no-files-found: error
-
-  macos-x64:
-    name: macos-x64
-    runs-on: macos-13
-    env:
-      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || secrets.AYUGRAM_API_ID || secrets.TELEGRAM_API_ID || secrets.API_ID || '2040' }}
-      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || secrets.AYUGRAM_API_HASH || secrets.TELEGRAM_API_HASH || secrets.API_HASH || 'b18441a1ff607e10a989891a5462e627' }}
-    steps:
-      - name: Check required secrets
-        run: |
-          if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
-            echo "::error::Missing API credentials. Add TDESKTOP_API_ID/TDESKTOP_API_HASH or reuse AyuGram credentials as AYUGRAM_API_ID/AYUGRAM_API_HASH, TELEGRAM_API_ID/TELEGRAM_API_HASH, or API_ID/API_HASH."
-            exit 1
+          prerelease=()
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+            title="SleepyGram $tag"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            tag="continuous"
+            title="SleepyGram Continuous"
+            prerelease=(--prerelease)
+          else
+            tag="${{ inputs.release_tag }}"
+            if [[ -z "$tag" || "$tag" == "manual" ]]; then
+              tag="manual-${GITHUB_RUN_NUMBER}"
+            fi
+            title="SleepyGram $tag"
+            prerelease=(--prerelease)
           fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          path: tdesktop
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git fetch --tags --force
+            git tag -f "$tag" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$tag"
+          fi
 
-      - name: Install tools
-        run: |
-          brew update
-          brew install automake meson nasm ninja pkg-config
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-      - name: Cache libraries
-        uses: actions/cache@v4
-        with:
-          path: |
-            Libraries
-            ThirdParty
-          key: macos-x64-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
-          restore-keys: macos-x64-libraries-
-
-      - name: Prepare libraries
-        run: ./tdesktop/Telegram/build/prepare/mac.sh silent
-
-      - name: Build
-        run: |
-          cd tdesktop/Telegram
-          ./configure.sh \
-            -D CMAKE_CONFIGURATION_TYPES=Release \
-            -D CMAKE_OSX_ARCHITECTURES=x86_64 \
-            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
-            -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
-            -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
-            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
-            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
-          cmake --build ../out --config Release --parallel
-
-      - name: Package
-        run: |
-          cd tdesktop/out/Release
-          test -d SleepyGram.app || { echo "::error::Smoke check failed: SleepyGram.app not found"; exit 1; }
-          codesign --force --deep --sign - SleepyGram.app
-          codesign --verify --deep --strict SleepyGram.app
-          ditto -c -k --sequesterRsrc --keepParent SleepyGram.app "$RUNNER_TEMP/SleepyGram-macos-x64.zip"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SleepyGram-macos-x64.zip
-          path: ${{ runner.temp }}/SleepyGram-macos-x64.zip
-          if-no-files-found: error
+          notes="Automated SleepyGram build for ${GITHUB_SHA}."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" \
+              --title "$title" \
+              --notes "$notes" \
+              --target "$GITHUB_SHA" \
+              "${prerelease[@]}"
+          fi
