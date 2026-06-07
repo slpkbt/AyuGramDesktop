@@ -33,7 +33,7 @@ GitHub Actions workflow лежит в `.github/workflows/build.yml` и соби�
 - `TDESKTOP_API_ID`
 - `TDESKTOP_API_HASH`
 
-Для временного reuse AyuGram workflow также принимает `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` или `API_ID` / `API_HASH`.
+Для временного reuse AyuGram workflow также принимает `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` или `API_ID` / `API_HASH`. Если таких secrets нет, CI использует публичные credentials из `docs/api_credentials.md`.
 
 Artifacts:
 

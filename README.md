@@ -31,7 +31,7 @@ Use the workflow in `.github/workflows/build.yml` to build Windows, Linux, and m
 - `TDESKTOP_API_ID`
 - `TDESKTOP_API_HASH`
 
-For temporary AyuGram reuse, the workflow also accepts `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`, or `API_ID` / `API_HASH`.
+For temporary AyuGram reuse, the workflow also accepts `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`, or `API_ID` / `API_HASH`. If no matching secrets are configured, CI falls back to the public credentials documented in `docs/api_credentials.md`.
 
 Artifacts produced by CI:
 
