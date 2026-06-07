@@ -54,6 +54,7 @@ class Result;
 namespace Data {
 class RepliesList;
 class ForumTopic;
+struct DrawToReplyRequest;
 } // namespace Data
 
 namespace HistoryView {
@@ -74,6 +75,7 @@ class EmptyPainter;
 class PinnedTracker;
 class TranslateBar;
 class SubsectionTabs;
+class SelfForwardsTagger;
 
 struct ChatViewId {
 	not_null<History*> history;
@@ -162,7 +164,8 @@ public:
 	void listMarkContentsRead(
 		const base::flat_set<not_null<HistoryItem*>> &items) override;
 	MessagesBarData listMessagesBar(
-		const std::vector<not_null<Element*>> &elements) override;
+		const std::vector<not_null<Element*>> &elements,
+		bool markLastAsRead) override;
 	void listContentRefreshed() override;
 	void listUpdateDateLink(
 		ClickHandlerPtr &link,
@@ -185,6 +188,7 @@ public:
 	auto listAllowedReactionsValue()
 		->rpl::producer<Data::AllowedReactions> override;
 	void listShowPremiumToast(not_null<DocumentData*> document) override;
+	bool handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 	void listOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) override;
@@ -290,6 +294,15 @@ private:
 
 	[[nodiscard]] Api::SendAction prepareSendAction(
 		Api::SendOptions options) const;
+	void sendTextWithTags(
+		TextWithTags textWithTags,
+		bool useCurrentWebPageDraft,
+		Api::SendOptions options,
+		Fn<void()> done);
+	void sendWithTextOverride(
+		TextWithEntities text,
+		Api::SendOptions options,
+		Fn<void()> done);
 	void send();
 	void send(Api::SendOptions options);
 	void sendVoice(const Controls::VoiceToSend &data);
@@ -299,7 +312,8 @@ private:
 		mtpRequestId *const saveEditMsgRequestId,
 		bool spoilered);
 	void chooseAttach(std::optional<bool> overrideSendImagesAsPhotos);
-	[[nodiscard]] SendMenu::Details sendMenuDetails() const;
+	[[nodiscard]] SendMenu::Details sendMenuDetails() const override;
+	bool processChosenSticker(ChatHelpers::FileChosen &&chosen) override;
 	[[nodiscard]] FullReplyTo replyTo() const;
 	[[nodiscard]] HistoryItem *lookupRepliesRoot() const;
 	[[nodiscard]] Data::ForumTopic *lookupTopic();
@@ -340,15 +354,8 @@ private:
 		std::optional<bool> overrideSendImagesAsPhotos,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Ui::PreparedList &list) const;
-	bool showSendingFilesError(
-		const Ui::PreparedList &list,
-		std::optional<bool> compress) const;
-	void sendingFilesConfirmed(
-		Ui::PreparedList &&list,
-		Ui::SendFilesWay way,
-		TextWithTags &&caption,
-		Api::SendOptions options,
-		bool ctrlShiftEnter);
+	bool showSendingFilesError(const Ui::PreparedBundle &bundle) const;
+
 	void sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options);
@@ -413,6 +420,7 @@ private:
 	std::unique_ptr<SubsectionTabs> _subsectionTabs;
 	rpl::lifetime _subsectionTabsLifetime;
 	rpl::lifetime _subsectionCheckLifetime;
+	rpl::lifetime _subsectionTopicsLifetime;
 	bool _canSendTexts = false;
 	bool _skipScrollEvent = false;
 	bool _synteticScrollEvent = false;
@@ -454,6 +462,8 @@ private:
 
 	bool _loaded = false;
 
+	std::unique_ptr<HistoryView::SelfForwardsTagger> _selfForwardsTagger;
+
 };
 
 class ChatMemento final : public Window::SectionMemento {
@@ -461,8 +471,7 @@ public:
 	explicit ChatMemento(
 		ChatViewId id,
 		MsgId highlightId = 0,
-		const TextWithEntities &highlightPart = {},
-		int highlightPartOffsetHint = 0);
+		MessageHighlightId highlight = {});
 
 	struct Comments {
 	};
@@ -511,20 +520,16 @@ public:
 	[[nodiscard]] MsgId highlightId() const {
 		return _highlightId;
 	}
-	[[nodiscard]] const TextWithEntities &highlightPart() const {
-		return _highlightPart;
-	}
-	[[nodiscard]] int highlightPartOffsetHint() const {
-		return _highlightPartOffsetHint;
+	[[nodiscard]] const MessageHighlightId &highlight() const {
+		return _highlight;
 	}
 
 private:
 	void setupTopicViewer();
 
 	ChatViewId _id;
-	const TextWithEntities _highlightPart;
-	const int _highlightPartOffsetHint = 0;
 	const MsgId _highlightId = 0;
+	const MessageHighlightId _highlight;
 	ListMemento _list;
 	std::shared_ptr<Data::RepliesList> _replies;
 	QVector<FullMsgId> _replyReturns;

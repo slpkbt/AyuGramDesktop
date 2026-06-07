@@ -42,6 +42,7 @@ class Track;
 } // namespace Media::Audio
 
 namespace Window {
+class Controller;
 class SessionController;
 } // namespace Window
 
@@ -87,8 +88,11 @@ using toggle = option<bool>;
 
 namespace Window::Notifications {
 
+extern const char kOptionCustomNotification[];
 extern const char kOptionGNotification[];
 extern base::options::toggle OptionGNotification;
+
+extern const char kOptionHideReplyButton[];
 
 class Manager;
 
@@ -106,6 +110,9 @@ public:
 
 	void createManager();
 	void setManager(Fn<std::unique_ptr<Manager>()> create);
+	[[nodiscard]] Manager &manager() const;
+	[[nodiscard]] rpl::producer<> managerChanged() const;
+	[[nodiscard]] bool nativeEnforced() const;
 
 	void checkDelayed();
 	void schedule(Data::ItemNotification notification);
@@ -124,7 +131,13 @@ public:
 	[[nodiscard]] rpl::producer<ChangeType> settingsChanged() const;
 	void notifySettingsChanged(ChangeType type);
 
-	void playSound(not_null<Main::Session*> session, DocumentId id);
+	[[nodiscard]] bool volumeSupported() const;
+	[[nodiscard]] rpl::producer<bool> volumeSupportedValue() const;
+
+	void playSound(
+		not_null<Main::Session*> session,
+		DocumentId id,
+		float64 volumeOverride = -1);
 	[[nodiscard]] QByteArray lookupSoundBytes(
 		not_null<Data::Session*> owner,
 		DocumentId id);
@@ -162,13 +175,13 @@ private:
 		crl::time delay = 0;
 		crl::time when = 0;
 	};
-	struct ReactionNotificationId {
+	struct SentNotificationId {
 		FullMsgId itemId;
 		uint64 sessionId = 0;
 
 		friend inline bool operator<(
-				ReactionNotificationId a,
-				ReactionNotificationId b) {
+				SentNotificationId a,
+				SentNotificationId b) {
 			return std::pair(a.itemId, a.sessionId)
 				< std::pair(b.itemId, b.sessionId);
 		}
@@ -183,8 +196,9 @@ private:
 	[[nodiscard]] Timing countTiming(
 		not_null<Data::Thread*> thread,
 		crl::time minimalDelay) const;
-	[[nodiscard]] bool skipReactionNotification(
-		not_null<HistoryItem*> item) const;
+	[[nodiscard]] bool skipSentNotification(
+		not_null<HistoryItem*> item,
+		base::flat_map<SentNotificationId, crl::time> &already) const;
 
 	void showNext();
 	void showGrouped();
@@ -209,10 +223,14 @@ private:
 		base::flat_map<crl::time, PeerData*>> _whenAlerts;
 
 	mutable base::flat_map<
-		ReactionNotificationId,
+		SentNotificationId,
 		crl::time> _sentReactionNotifications;
+	mutable base::flat_map<
+		SentNotificationId,
+		crl::time> _sentPollVoteNotifications;
 
 	std::unique_ptr<Manager> _manager;
+	rpl::event_stream<> _managerChanged;
 
 	rpl::event_stream<ChangeType> _settingsChanged;
 
@@ -262,6 +280,7 @@ public:
 		int forwardedCount = 0;
 		PeerData *reactionFrom = nullptr;
 		Data::ReactionId reactionId;
+		QByteArray pollVoteOption;
 		std::optional<DocumentId> soundId;
 	};
 
@@ -300,6 +319,9 @@ public:
 		NotificationId id,
 		ActivateOptions &&options = {});
 	void notificationReplied(NotificationId id, const TextWithTags &reply);
+	void notificationActionActivated(
+		NotificationId id,
+		const QString &actionId);
 
 	struct DisplayOptions {
 		bool hideNameAndPhoto : 1 = false;
@@ -318,6 +340,10 @@ public:
 		not_null<HistoryItem*> item,
 		const Data::ReactionId &reaction,
 		bool hideContent);
+	[[nodiscard]] static TextWithEntities ComposePollVoteNotification(
+		not_null<HistoryItem*> item,
+		const QByteArray &option,
+		bool hideContent);
 
 	[[nodiscard]] TextWithEntities addTargetAccountName(
 		TextWithEntities title,
@@ -331,9 +357,7 @@ public:
 	[[nodiscard]] bool skipToast() const {
 		return doSkipToast();
 	}
-	void maybePlaySound(Fn<void()> playSound) {
-		doMaybePlaySound(std::move(playSound));
-	}
+	void maybePlaySound(Fn<void()> playSound);
 	void maybeFlashBounce(Fn<void()> flashBounce) {
 		doMaybeFlashBounce(std::move(flashBounce));
 	}
@@ -386,6 +410,10 @@ public:
 	}
 
 	using NotificationSound = Media::Audio::LocalSound;
+	struct NotificationAction {
+		QString id;
+		QString text;
+	};
 	struct NotificationInfo {
 		not_null<PeerData*> peer;
 		MsgId topicRootId = 0;
@@ -396,6 +424,7 @@ public:
 		QString message;
 		Fn<NotificationSound()> sound;
 		DisplayOptions options;
+		std::vector<NotificationAction> actions;
 	};
 
 protected:
@@ -458,5 +487,7 @@ protected:
 };
 
 [[nodiscard]] QString WrapFromScheduled(const QString &text);
+
+[[nodiscard]] QRect NotificationDisplayRect(Window::Controller *controller);
 
 } // namespace Window::Notifications

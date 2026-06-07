@@ -45,6 +45,8 @@ namespace Window {
 class SessionNavigation;
 } // namespace Window
 
+struct HistoryMessageMarkupData;
+
 struct PreparedServiceText {
 	TextWithEntities text;
 	std::vector<ClickHandlerPtr> links;
@@ -84,6 +86,9 @@ using OnStackUsers = std::array<UserData*, kMaxUnreadReactions>;
 void CheckReactionNotificationSchedule(
 	not_null<HistoryItem*> item,
 	const OnStackUsers &wasUsers);
+void CheckPollVoteNotificationSchedule(
+	not_null<HistoryItem*> item,
+	const std::vector<not_null<PeerData*>> &wasRecentVoters);
 [[nodiscard]] MessageFlags NewForwardedFlags(
 	not_null<PeerData*> peer,
 	PeerId from,
@@ -95,6 +100,7 @@ void CheckReactionNotificationSchedule(
 [[nodiscard]] TextWithEntities EnsureNonEmpty(
 	const TextWithEntities &text = TextWithEntities());
 [[nodiscard]] TextWithEntities UnsupportedMessageText();
+[[nodiscard]] HistoryMessageMarkupData UnsupportedMessageMarkup();
 
 void RequestDependentMessageItem(
 	not_null<HistoryItem*> item,
@@ -151,7 +157,7 @@ struct SendPaymentDetails {
 
 [[nodiscard]] bool SuggestPaymentDataReady(
 	not_null<PeerData*> peer,
-	SuggestPostOptions suggest);
+	SuggestOptions suggest);
 
 struct PaidConfirmStyles {
 	const style::FlatLabel *label = nullptr;
@@ -229,13 +235,11 @@ private:
 	not_null<PeerData*> peer,
 	MsgId msgId,
 	FullMsgId returnToId = FullMsgId(),
-	TextWithEntities highlightPart = {},
-	int highlightPartOffsetHint = 0);
+	MessageHighlightId highlight = {});
 [[nodiscard]] ClickHandlerPtr JumpToMessageClickHandler(
 	not_null<HistoryItem*> item,
 	FullMsgId returnToId = FullMsgId(),
-	TextWithEntities highlightPart = {},
-	int highlightPartOffsetHint = 0);
+	MessageHighlightId highlight = {});
 [[nodiscard]] ClickHandlerPtr JumpToStoryClickHandler(
 	not_null<Data::Story*> story);
 ClickHandlerPtr JumpToStoryClickHandler(

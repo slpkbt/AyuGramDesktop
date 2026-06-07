@@ -14,19 +14,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/crash_reports.h"
+#include "menu/menu_dock.h"
 #include "storage/localstorage.h"
 #include "media/audio/media_audio.h"
-#include "media/player/media_player_instance.h"
 #include "window/window_controller.h"
 #include "base/platform/mac/base_utilities_mac.h"
 #include "base/platform/base_platform_info.h"
-#include "lang/lang_keys.h"
 #include "base/timer.h"
 #include "styles/style_window.h"
 #include "platform/platform_specific.h"
 
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QMenu>
 #if __has_include(<QtCore/QOperatingSystemVersion>)
 #include <QtCore/QOperatingSystemVersion>
 #endif // __has_include(<QtCore/QOperatingSystemVersion>)
@@ -38,6 +38,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hidsystem/ev_keymap.h>
 
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+
 using Platform::Q2NSString;
 using Platform::NS2QString;
 
@@ -45,46 +48,15 @@ namespace {
 
 constexpr auto kIgnoreActivationTimeoutMs = 500;
 
-NSMenuItem *CreateMenuItem(
-		QString title,
-		rpl::lifetime &lifetime,
-		Fn<void()> callback,
-		bool enabled = true) {
-	id block = [^{
-		Core::Sandbox::Instance().customEnterFromEventLoop(callback);
-	} copy];
-
-	NSMenuItem *item = [[NSMenuItem alloc]
-		initWithTitle:Q2NSString(title)
-		action:@selector(invoke)
-		keyEquivalent:@""];
-	[item setTarget:block];
-	[item setEnabled:enabled];
-
-	lifetime.add([=] {
-		[block release];
+void SetupDockMenu() {
+	static const auto DockMenu = std::make_unique<QMenu>();
+	QObject::connect(DockMenu.get(), &QMenu::aboutToShow, [] {
+		Menu::RefreshDockMenu(DockMenu.get());
 	});
-	return [item autorelease];
+	DockMenu->setAsDockMenu();
 }
 
 } // namespace
-
-@interface RpMenu : NSMenu {
-}
-
-- (rpl::lifetime &) lifetime;
-
-@end // @interface Menu
-
-@implementation RpMenu {
-	rpl::lifetime _lifetime;
-}
-
-- (rpl::lifetime &) lifetime {
-	return _lifetime;
-}
-
-@end // @implementation Menu
 
 @interface qVisualize : NSObject {
 }
@@ -139,8 +111,6 @@ NSMenuItem *CreateMenuItem(
 - (void) receiveWakeNote:(NSNotification*)note;
 
 - (void) ignoreApplicationActivationRightNow;
-
-- (NSMenu *) applicationDockMenu:(NSApplication *)sender;
 
 @end // @interface ApplicationDelegate
 
@@ -216,61 +186,31 @@ ApplicationDelegate *_sharedDelegate = nil;
 	_ignoreActivationStop.callOnce(kIgnoreActivationTimeoutMs);
 }
 
-- (NSMenu *) applicationDockMenu:(NSApplication *)sender {
-	if (!Core::IsAppLaunched()) {
-		return nil;
-	}
-	RpMenu* dockMenu = [[[RpMenu alloc] initWithTitle: @""] autorelease];
-	[dockMenu setAutoenablesItems:false];
-
-	auto notifyCallback = [] {
-		auto &settings = Core::App().settings();
-		settings.setDesktopNotify(!settings.desktopNotify());
-	};
-	[dockMenu addItem:CreateMenuItem(
-		Core::App().settings().desktopNotify()
-			? tr::lng_disable_notifications_from_tray(tr::now)
-			: tr::lng_enable_notifications_from_tray(tr::now),
-		[dockMenu lifetime],
-		std::move(notifyCallback))];
-
-	using namespace Media::Player;
-	const auto state = instance()->getState(instance()->getActiveType());
-	if (!IsStoppedOrStopping(state.state)) {
-		[dockMenu addItem:[NSMenuItem separatorItem]];
-		[dockMenu addItem:CreateMenuItem(
-			tr::lng_mac_menu_player_previous(tr::now),
-			[dockMenu lifetime],
-			[] { instance()->previous(); },
-			instance()->previousAvailable(instance()->getActiveType()))];
-		[dockMenu addItem:CreateMenuItem(
-			IsPausedOrPausing(state.state)
-				? tr::lng_mac_menu_player_resume(tr::now)
-				: tr::lng_mac_menu_player_pause(tr::now),
-			[dockMenu lifetime],
-			[] { instance()->playPause(); })];
-		[dockMenu addItem:CreateMenuItem(
-			tr::lng_mac_menu_player_next(tr::now),
-			[dockMenu lifetime],
-			[] { instance()->next(); },
-			instance()->nextAvailable(instance()->getActiveType()))];
-	}
-
-	return dockMenu;
-}
-
 @end // @implementation ApplicationDelegate
 
 namespace Platform {
 
 void SetApplicationIcon(const QIcon &icon) {
-	NSImage *image = nil;
-	if (!icon.isNull()) {
-		auto pixmap = icon.pixmap(1024, 1024);
-		pixmap.setDevicePixelRatio(style::DevicePixelRatio());
-		image = Q2NSImage(pixmap.toImage());
-	}
-	[[NSApplication sharedApplication] setApplicationIconImage:image];
+	const auto &settings = AyuSettings::getInstance();
+    if (settings.appIcon().isEmpty()) {
+        return;
+    }
+
+	const auto name = QString("AppIcon-") + settings.appIcon()[0].toUpper() + settings.appIcon().mid(1);
+    @autoreleasepool {
+        if (name == QString("AppIcon-Default")) {
+            NSApplication.sharedApplication.applicationIconImage = nil;
+            return;
+        }
+        
+        // NSString *iconPath = [NSBundle.mainBundle pathForResource:Q2NSString(name) ofType:@"icns"];
+        // NSImage *icon = [[NSImage alloc] initWithContentsOfFile:iconPath];
+		NSImage *icon = [NSBundle.mainBundle imageForResource:Q2NSString(name)];
+
+        if (icon) {
+            NSApplication.sharedApplication.applicationIconImage = icon;
+        }
+    }
 }
 
 } // namespace Platform
@@ -310,6 +250,8 @@ void objc_start() {
 		addObserver: _sharedDelegate
 		selector: @selector(receiveWakeNote:)
 		name: NSWorkspaceDidWakeNotification object: NULL];
+
+	crl::on_main([=] { SetupDockMenu(); });
 }
 
 void objc_ignoreApplicationActivationRightNow() {

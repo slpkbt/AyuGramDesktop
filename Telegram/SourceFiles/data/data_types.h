@@ -357,6 +357,18 @@ enum class MessageFlag : uint64 {
 	StarsPaidSuggested    = (1ULL << 52),
 	TonPaidSuggested      = (1ULL << 53),
 
+	StoryInProfile        = (1ULL << 54),
+	SavedMusicItem        = (1ULL << 55),
+
+	HasHiddenLinks        = (1ULL << 56),
+	HasSummaryEntry       = (1ULL << 57),
+	CanBeSummarized       = (1ULL << 58),
+	HasUnreadPollVote     = (1ULL << 59),
+
+	TextAppearing         = (1ULL << 60),
+	TextAppearingStarted  = (1ULL << 61),
+
+	GuestChatViaFrom      = (1ULL << 62),
 	AyuNoForwards         = (1ULL << 63),
 };
 inline constexpr bool is_flag_type(MessageFlag) { return true; }

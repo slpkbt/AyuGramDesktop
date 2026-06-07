@@ -2,7 +2,7 @@
 
 FROM rockylinux:8 AS builder
 ENV LANG=C.UTF-8
-ENV TOOLSET=gcc-toolset-14
+ENV TOOLSET=gcc-toolset-15
 ENV PATH=/opt/rh/$TOOLSET/root/usr/bin:$PATH
 ENV LIBRARY_PATH=/opt/rh/$TOOLSET/root/usr/lib64:/opt/rh/$TOOLSET/root/usr/lib:/usr/local/lib64:/usr/local/lib:/lib64:/lib:/usr/lib64:/usr/lib
 ENV LD_LIBRARY_PATH=$LIBRARY_PATH
@@ -12,14 +12,14 @@ RUN dnf -y install epel-release \
 	&& dnf config-manager --set-enabled powertools \
 	&& dnf -y install cmake autoconf automake libtool pkgconfig make patch git \
 		python3.11-pip python3.11-devel gperf flex bison clang clang-tools-extra \
-		lld nasm yasm file which wget perl-open perl-XML-Parser perl-IPC-Cmd \
+		lld nasm file which wget perl-open perl-XML-Parser perl-IPC-Cmd \
 		xorg-x11-util-macros $TOOLSET-gcc $TOOLSET-gcc-c++ $TOOLSET-binutils \
 		$TOOLSET-gdb $TOOLSET-libasan-devel libffi-devel fontconfig-devel \
 		freetype-devel libX11-devel wayland-devel alsa-lib-devel \
 		pulseaudio-libs-devel mesa-libGL-devel mesa-libEGL-devel mesa-libgbm-devel \
 		libdrm-devel vulkan-devel libva-devel libvdpau-devel libselinux-devel \
 		libmount-devel systemd-devel glib2-devel gobject-introspection-devel \
-		at-spi2-core-devel gtk3-devel boost1.78-devel \
+		at-spi2-core-devel gtk3-devel \
 	&& dnf clean all
 
 RUN alternatives --set python3 /usr/bin/python3.11
@@ -31,10 +31,10 @@ for i in "\$@"; do
 done
 exec /usr/bin/pkg-config --static "\$@"
 EOF
-RUN sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin -fuse-ld=lld{% endif %}")/' /usr/share/cmake/Modules/Compiler/GNU.cmake
+RUN sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/")/ -O0 {% if LTO %}-fno-lto -fno-use-linker-plugin{% endif %} -fuse-ld=lld")/' /usr/share/cmake/Modules/Compiler/GNU.cmake
 RUN sed -i 's/NO_DEFAULT_PATH//g; s/PKG_CONFIG_ALLOW_SYSTEM_LIBS/PKG_CONFIG_IS_DUMB/g' /usr/share/cmake/Modules/FindPkgConfig.cmake
-RUN sed -i 's/set(OpenGL_GL_PREFERENCE "")/set(OpenGL_GL_PREFERENCE "LEGACY")/' /usr/share/cmake/Modules/FindOpenGL.cmake
 RUN sed -i '/Requires.private: valgrind/d' /usr/lib64/pkgconfig/libdrm.pc
+RUN sed -i '/Requires.private: gl/s/gl/opengl glx/' /usr/lib64/pkgconfig/epoxy.pc
 RUN sed -i 's/-lharfbuzz//' /usr/lib64/pkgconfig/harfbuzz.pc
 RUN sed -i 's/-lpng16//' /usr/lib64/pkgconfig/libpng16.pc
 RUN echo set debuginfod enabled on > /opt/rh/$TOOLSET/root/etc/gdbinit.d/00-debuginfod.gdb
@@ -44,9 +44,9 @@ WORKDIR /usr/src
 ENV AR=gcc-ar
 ENV RANLIB=gcc-ranlib
 ENV NM=gcc-nm
-ENV CFLAGS='{% if DEBUG %}-g{% endif %} -O3 {% if LTO %}-flto=auto -ffat-lto-objects{% endif %} -pipe -fPIC -fno-strict-aliasing -fexceptions -fasynchronous-unwind-tables -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -fhardened -Wno-hardened'
+ENV CFLAGS='{% if DEBUG %}-g{% endif %} {% if MINSIZE %}-Os{% else %}-O3{% endif %} {% if LTO %}-flto=auto -ffat-lto-objects{% endif %} -pipe -fPIC -fno-strict-aliasing -fexceptions -fasynchronous-unwind-tables -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -fhardened -Wno-hardened'
 ENV CXXFLAGS=$CFLAGS
-ENV LDFLAGS='{% if not LTO %}-fuse-ld=lld{% endif %} -static-libstdc++ -static-libgcc -static-libasan -pthread -ldl -Wl,--as-needed -Wl,-z,muldefs'
+ENV LDFLAGS='-static-libstdc++ -static-libgcc -static-libasan -pthread -Wl,--push-state,--no-as-needed,-ldl,--pop-state -Wl,--as-needed -Wl,-z,muldefs'
 
 ENV CMAKE_GENERATOR=Ninja
 ENV CMAKE_BUILD_TYPE=None
@@ -76,6 +76,8 @@ RUN git init Implib.so \
 	&& implib /usr/lib64/libva-drm.so \
 	&& implib /usr/lib64/libva.so \
 	&& implib /usr/lib64/libEGL.so \
+	&& implib /usr/lib64/libGLX.so \
+	&& implib /usr/lib64/libOpenGL.so \
 	&& implib /usr/lib64/libGL.so \
 	&& implib /usr/lib64/libdrm.so \
 	&& implib /usr/lib64/libwayland-egl.so \
@@ -91,7 +93,7 @@ FROM builder AS patches
 RUN git init patches \
 	&& cd patches \
 	&& git remote add origin https://github.com/desktop-app/patches.git \
-	&& git fetch --depth=1 origin 1ffcb17817a2cab167061d530703842395291e69 \
+	&& git fetch --depth=1 origin 4519c85c924b9da81f29d4aac045886f896ee479 \
 	&& git reset --hard FETCH_HEAD \
 	&& rm -rf .git
 
@@ -162,6 +164,19 @@ RUN git clone -b 1.0.7 --depth=1 https://github.com/google/highway.git \
 	&& cd .. \
 	&& rm -rf highway
 
+FROM builder AS mozjpeg
+RUN git clone -b v4.1.5 --depth=1 https://github.com/mozilla/mozjpeg.git \
+	&& cd mozjpeg \
+	&& cmake -B build . \
+		-DCMAKE_INSTALL_PREFIX=/usr/local \
+		-DENABLE_SHARED=OFF \
+		-DWITH_JPEG8=ON \
+		-DPNG_SUPPORTED=OFF \
+	&& cmake --build build --parallel \
+	&& DESTDIR=/usr/src/mozjpeg-cache cmake --install build \
+	&& cd .. \
+	&& rm -rf mozjpeg
+
 FROM builder AS opus
 RUN git clone -b v1.5.2 --depth=1 https://github.com/xiph/opus.git \
 	&& cd opus \
@@ -172,7 +187,7 @@ RUN git clone -b v1.5.2 --depth=1 https://github.com/xiph/opus.git \
 	&& rm -rf opus
 
 FROM builder AS dav1d
-RUN git clone -b 1.5.1 --depth=1 https://github.com/videolan/dav1d.git \
+RUN git clone -b 1.5.3 --depth=1 https://github.com/videolan/dav1d.git \
 	&& cd dav1d \
 	&& meson build \
 		--buildtype=plain \
@@ -229,7 +244,7 @@ RUN git init libvpx \
 	&& rm -rf libvpx
 
 FROM builder AS webp
-RUN git clone -b v1.5.0 --depth=1 https://github.com/webmproject/libwebp.git \
+RUN git clone -b v1.6.0 --depth=1 https://github.com/webmproject/libwebp.git \
 	&& cd libwebp \
 	&& cmake -B build . \
 		-DWEBP_BUILD_ANIM_UTILS=OFF \
@@ -263,15 +278,17 @@ RUN git clone -b v1.3.0 --depth=1 https://github.com/AOMediaCodec/libavif.git \
 FROM builder AS heif
 COPY --link --from=de265 /usr/src/de265-cache /
 
-RUN git clone -b v1.19.8 --depth=1 https://github.com/strukturag/libheif.git \
+RUN git clone -b v1.21.2 --depth=1 https://github.com/strukturag/libheif.git \
 	&& cd libheif \
 	&& cmake -B build . \
 		-DBUILD_SHARED_LIBS=OFF \
+		-DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON \
 		-DBUILD_TESTING=OFF \
 		-DENABLE_PLUGIN_LOADING=OFF \
 		-DWITH_X265=OFF \
 		-DWITH_AOM_DECODER=OFF \
 		-DWITH_AOM_ENCODER=OFF \
+		-DWITH_X264=OFF \
 		-DWITH_OpenH264_DECODER=OFF \
 		-DWITH_RAV1E=OFF \
 		-DWITH_RAV1E_PLUGIN=OFF \
@@ -290,15 +307,13 @@ COPY --link --from=lcms2 /usr/src/lcms2-cache /
 COPY --link --from=brotli /usr/src/brotli-cache /
 COPY --link --from=highway /usr/src/highway-cache /
 
-RUN git clone -b v0.11.1 --depth=1 https://github.com/libjxl/libjxl.git \
+RUN git clone -b v0.11.2 --depth=1 https://github.com/libjxl/libjxl.git \
 	&& cd libjxl \
-	&& git submodule update --init --recursive --depth=1 third_party/libjpeg-turbo \
 	&& cmake -B build . \
 		-DBUILD_SHARED_LIBS=OFF \
 		-DBUILD_TESTING=OFF \
 		-DJPEGXL_ENABLE_DEVTOOLS=OFF \
 		-DJPEGXL_ENABLE_TOOLS=OFF \
-		-DJPEGXL_INSTALL_JPEGLI_LIBJPEG=ON \
 		-DJPEGXL_ENABLE_DOXYGEN=OFF \
 		-DJPEGXL_ENABLE_MANPAGES=OFF \
 		-DJPEGXL_ENABLE_BENCHMARK=OFF \
@@ -311,11 +326,6 @@ RUN git clone -b v0.11.1 --depth=1 https://github.com/libjxl/libjxl.git \
 	&& export DESTDIR=/usr/src/jxl-cache \
 	&& cmake --install build \
 	&& sed -i 's/-lstdc++//' $DESTDIR/usr/local/lib64/pkgconfig/libjxl*.pc \
-	&& rm $DESTDIR/usr/local/lib64/libjpeg.so* \
-	&& cp build/lib/libjpegli-static.a $DESTDIR/usr/local/lib64/libjpeg.a \
-	&& mkdir build/hwy \
-	&& ar --output=build/hwy x /usr/local/lib64/libhwy.a \
-	&& ar rcs $DESTDIR/usr/local/lib64/libjpeg.a build/lib/CMakeFiles/jpegli-libjpeg-obj.dir/jpegli/libjpeg_wrapper.cc.o build/hwy/* \
 	&& cd .. \
 	&& rm -rf libjxl
 
@@ -497,23 +507,6 @@ RUN git clone -b libXcomposite-0.4.6 --depth=1 https://github.com/gitlab-freedes
 	&& cd .. \
 	&& rm -rf libxcomposite
 
-FROM builder AS wayland
-RUN git clone -b 1.19.0 --depth=1 https://github.com/gitlab-freedesktop-mirrors/wayland.git \
-	&& cd wayland \
-	&& sed -i "/subdir('tests')/d" meson.build \
-	&& meson build \
-		--buildtype=plain \
-		--default-library=static \
-		-Ddocumentation=false \
-		-Ddtd_validation=false \
-		-Dicon_directory=/usr/share/icons \
-	&& meson compile -C build src/wayland-scanner \
-	&& mkdir -p "/usr/src/wayland-cache/usr/local/bin" "/usr/src/wayland-cache/usr/local/lib64/pkgconfig" \
-	&& cp build/src/wayland-scanner "/usr/src/wayland-cache/usr/local/bin" \
-	&& sed 's@bindir=${prefix}/bin@bindir=${prefix}/local/bin@;s/1.21.0/1.19.0/' /usr/lib64/pkgconfig/wayland-scanner.pc > "/usr/src/wayland-cache/usr/local/lib64/pkgconfig/wayland-scanner.pc" \
-	&& cd .. \
-	&& rm -rf wayland
-
 FROM builder AS nv-codec-headers
 RUN git clone -b n12.1.14.0 --depth=1 https://github.com/FFmpeg/nv-codec-headers.git \
 	&& DESTDIR=/usr/src/nv-codec-headers-cache make -C nv-codec-headers install \
@@ -533,13 +526,16 @@ RUN git clone -b n6.1.1 --depth=1 https://github.com/FFmpeg/FFmpeg.git \
 	&& ./configure \
 		--extra-cflags="-fno-lto -DCONFIG_SAFE_BITSTREAM_READER=1" \
 		--extra-cxxflags="-fno-lto -DCONFIG_SAFE_BITSTREAM_READER=1" \
-		--extra-ldflags="-lstdc++" \
+		--extra-ldflags="-Wl,--push-state,--no-as-needed,-lstdc++,--pop-state" \
 		--disable-debug \
 		--disable-programs \
 		--disable-doc \
 		--disable-network \
 		--disable-autodetect \
 		--disable-everything \
+{%- if MINSIZE %}
+		--enable-small \
+{%- endif %}
 		--enable-libdav1d \
 		--enable-libopenh264 \
 		--enable-libopus \
@@ -678,8 +674,8 @@ RUN git clone -b 0.3.62 --depth=1 https://github.com/PipeWire/pipewire.git \
 		--buildtype=plain \
 		-Dtests=disabled \
 		-Dexamples=disabled \
-		-Dsession-managers=media-session \
 		-Dspa-plugins=disabled \
+		-Dsession-managers= \
 	&& meson compile -C build \
 	&& DESTDIR=/usr/src/pipewire-cache meson install -C build \
 	&& cd .. \
@@ -735,8 +731,8 @@ RUN git clone -b xkbcommon-1.6.0 --depth=1 https://github.com/xkbcommon/libxkbco
 FROM patches AS qt
 COPY --link --from=zlib /usr/src/zlib-cache /
 COPY --link --from=lcms2 /usr/src/lcms2-cache /
+COPY --link --from=mozjpeg /usr/src/mozjpeg-cache /
 COPY --link --from=webp /usr/src/webp-cache /
-COPY --link --from=jxl /usr/src/jxl-cache /
 COPY --link --from=xcb /usr/src/xcb-cache /
 COPY --link --from=xcb-wm /usr/src/xcb-wm-cache /
 COPY --link --from=xcb-util /usr/src/xcb-util-cache /
@@ -744,22 +740,21 @@ COPY --link --from=xcb-image /usr/src/xcb-image-cache /
 COPY --link --from=xcb-keysyms /usr/src/xcb-keysyms-cache /
 COPY --link --from=xcb-render-util /usr/src/xcb-render-util-cache /
 COPY --link --from=xcb-cursor /usr/src/xcb-cursor-cache /
-COPY --link --from=wayland /usr/src/wayland-cache /
 COPY --link --from=openssl /usr/src/openssl-cache /
 COPY --link --from=xkbcommon /usr/src/xkbcommon-cache /
 
-ENV QT=6.9.1
+ENV QT=6.11.0
 RUN git clone -b v$QT --depth=1 https://github.com/qt/qt5.git \
 	&& cd qt5 \
 	&& git submodule update --init --recursive --depth=1 qtbase qtdeclarative qtwayland qtimageformats qtsvg qtshadertools \
-	&& cd qtbase \
-	&& find ../../patches/qtbase_$QT -type f -print0 | sort -z | xargs -r0 git apply \
-	&& cd ../qtwayland \
-	&& find ../../patches/qtwayland_$QT -type f -print0 | sort -z | xargs -r0 git apply \
-	&& cd .. \
+	&& find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -r0 git -C qtbase apply \
+	&& find $PWD/../patches/qtwayland_$QT -type f -print0 | sort -z | xargs -r0 git -C qtwayland apply \
 	&& cmake -B build . \
 		-DCMAKE_INSTALL_PREFIX=/usr/local \
 		-DBUILD_SHARED_LIBS=OFF \
+{%- if ASAN %}
+		-DFEATURE_sanitize_address=ON \
+{%- endif %}
 		-DQT_QPA_PLATFORMS="wayland;xcb" \
 		-DINPUT_libpng=qt \
 		-DINPUT_harfbuzz=qt \
@@ -774,6 +769,14 @@ RUN git clone -b v$QT --depth=1 https://github.com/qt/qt5.git \
 	&& cd .. \
 	&& rm -rf qt5
 
+FROM builder AS boost
+RUN curl -sSL https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.gz | tar -xz \
+	&& cd boost_* \
+	&& ./bootstrap.sh --prefix=/usr/src/boost-cache/usr/local --with-libraries=regex \
+	&& ./b2 release link=static install \
+	&& cd .. \
+	&& rm -rf boost_*
+
 FROM builder AS breakpad
 RUN git clone -b v2024.02.16 --depth=1 https://chromium.googlesource.com/breakpad/breakpad.git \
 	&& cd breakpad \
@@ -786,11 +789,11 @@ RUN git clone -b v2024.02.16 --depth=1 https://chromium.googlesource.com/breakpa
 
 FROM builder AS webrtc
 COPY --link --from=zlib /usr/src/zlib-cache /
+COPY --link --from=mozjpeg /usr/src/mozjpeg-cache /
 COPY --link --from=opus /usr/src/opus-cache /
 COPY --link --from=openh264 /usr/src/openh264-cache /
 COPY --link --from=dav1d /usr/src/dav1d-cache /
 COPY --link --from=vpx /usr/src/vpx-cache /
-COPY --link --from=jxl /usr/src/jxl-cache /
 COPY --link --from=ffmpeg /usr/src/ffmpeg-cache /
 COPY --link --from=openssl /usr/src/openssl-cache /
 COPY --link --from=xext /usr/src/xext-cache /
@@ -806,7 +809,7 @@ COPY --link --from=pipewire /usr/src/pipewire-cache /
 RUN git init tg_owt \
 	&& cd tg_owt \
 	&& git remote add origin https://github.com/desktop-app/tg_owt.git \
-	&& git fetch --depth=1 origin 62321fd7128ab2650b459d4195781af8185e46b5 \
+	&& git fetch --depth=1 origin 5c5c71258777d0196dbb3a09cc37d2f56ead28ab \
 	&& git reset --hard FETCH_HEAD \
 	&& git submodule update --init --recursive --depth=1 \
 	&& cmake -B build . -DTG_OWT_DLOPEN_PIPEWIRE=ON \
@@ -850,6 +853,7 @@ COPY --link --from=protobuf /usr/src/protobuf-cache /
 COPY --link --from=lcms2 /usr/src/lcms2-cache /
 COPY --link --from=brotli /usr/src/brotli-cache /
 COPY --link --from=highway /usr/src/highway-cache /
+COPY --link --from=mozjpeg /usr/src/mozjpeg-cache /
 COPY --link --from=opus /usr/src/opus-cache /
 COPY --link --from=dav1d /usr/src/dav1d-cache /
 COPY --link --from=openh264 /usr/src/openh264-cache /
@@ -875,12 +879,12 @@ COPY --link --from=xrandr /usr/src/xrandr-cache /
 COPY --link --from=xrender /usr/src/xrender-cache /
 COPY --link --from=xdamage /usr/src/xdamage-cache /
 COPY --link --from=xcomposite /usr/src/xcomposite-cache /
-COPY --link --from=wayland /usr/src/wayland-cache /
 COPY --link --from=ffmpeg /usr/src/ffmpeg-cache /
 COPY --link --from=openal /usr/src/openal-cache /
 COPY --link --from=openssl /usr/src/openssl-cache /
 COPY --link --from=xkbcommon /usr/src/xkbcommon-cache /
 COPY --link --from=qt /usr/src/qt-cache /
+COPY --link --from=boost /usr/src/boost-cache /
 COPY --link --from=breakpad /usr/src/breakpad-cache /
 COPY --link --from=webrtc /usr/src/webrtc-cache /
 COPY --link --from=ada /usr/src/ada-cache /
@@ -890,9 +894,6 @@ COPY --link --from=patches /usr/src/patches patches
 RUN patch -p1 -d /usr/lib64/gobject-introspection -i $PWD/patches/gobject-introspection.patch && rm -rf patches
 
 WORKDIR /usr/src/tdesktop
-ENV BOOST_INCLUDEDIR=/usr/include/boost1.78
-ENV BOOST_LIBRARYDIR=/usr/lib64/boost1.78
-
 USER user
 VOLUME [ "/usr/src/tdesktop" ]
 CMD [ "/usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh" ]

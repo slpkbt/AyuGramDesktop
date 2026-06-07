@@ -1,5 +1,9 @@
 ## Build instructions for macOS
 
+### Note
+
+The build has only been tested with Xcode 26.1. Although it may work on lower Xcode versions, this is not guaranteed.
+
 ### Prepare folder
 
 Choose a folder for the future build, for example **/Users/user/TBuild**. It will be named ***BuildPath*** in the rest of this document. All commands will be launched from Terminal.
@@ -17,7 +21,7 @@ Go to ***BuildPath*** and run
 
     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    git clone --recursive https://github.com/AyuGram/AyuGramDesktop.git tdesktop
+    git clone --recursive https://github.com/slpkbt/SleepyGram.git tdesktop
     ./tdesktop/Telegram/build/prepare/mac.sh
 
 ### Building the project

@@ -51,6 +51,7 @@ public:
 	ClickHandlerPtr link() override;
 
 	[[nodiscard]] bool ready() const;
+	[[nodiscard]] bool stoppedOnLastFrame() const;
 	DocumentData *document() override;
 	void stickerClearLoopPlayed() override;
 	std::unique_ptr<StickerPlayer> stickerTakePlayer(
@@ -111,6 +112,10 @@ private:
 	void paintPath(Painter &p, const PaintContext &context, const QRect &r);
 	[[nodiscard]] QPixmap paintedPixmap(const PaintContext &context) const;
 	[[nodiscard]] bool mirrorHorizontal() const;
+	void paintSensitiveTag(
+		Painter &p,
+		const PaintContext &context,
+		const QRect &r);
 
 	void ensureDataMediaCreated() const;
 	void dataMediaCreated() const;
@@ -145,6 +150,7 @@ private:
 	bool _webpagePart : 1 = false;
 	bool _playingOnce : 1 = false;
 	bool _stopOnLastFrame : 1 = false;
+	bool _sensitiveBlurred : 1 = false;
 
 };
 

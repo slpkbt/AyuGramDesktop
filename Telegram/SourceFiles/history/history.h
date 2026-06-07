@@ -23,6 +23,7 @@ class HistoryItem;
 struct HistoryItemCommonFields;
 struct HistoryMessageMarkupData;
 class HistoryMainElementDelegateMixin;
+class HistoryStreamedDrafts;
 struct LanguageId;
 
 namespace Data {
@@ -50,6 +51,12 @@ enum class NewMessageType {
 	Unread,
 	Last,
 	Existing,
+};
+
+enum class NewAddType : uchar {
+	Outgoing,
+	RegularIncoming,
+	StreamedDraftFinish,
 };
 
 class History final : public Data::Thread {
@@ -80,6 +87,8 @@ public:
 	void monoforumChanged(Data::SavedMessages *old);
 	[[nodiscard]] bool amMonoforumAdmin() const;
 	[[nodiscard]] bool suggestDraftAllowed() const;
+	[[nodiscard]] bool hasForumThreadBars() const;
+	void forumTabsChanged(bool forumTabs);
 
 	[[nodiscard]] not_null<History*> migrateToOrMe() const;
 	[[nodiscard]] History *migrateFrom() const;
@@ -88,6 +97,9 @@ public:
 	[[nodiscard]] Data::HistoryMessages &messages();
 	[[nodiscard]] const Data::HistoryMessages &messages() const;
 	[[nodiscard]] Data::HistoryMessages *maybeMessages();
+
+	[[nodiscard]] HistoryStreamedDrafts &streamedDrafts();
+	[[nodiscard]] HistoryStreamedDrafts *streamedDraftsIfExists() const;
 
 	[[nodiscard]] HistoryItem *joinedMessageInstance() const;
 	void checkLocalMessages();
@@ -188,7 +200,7 @@ public:
 	void addOlderSlice(const QVector<MTPMessage> &slice);
 	void addNewerSlice(const QVector<MTPMessage> &slice);
 
-	void newItemAdded(not_null<HistoryItem*> item);
+	void newItemAdded(not_null<HistoryItem*> item, NewAddType type);
 
 	void registerClientSideMessage(not_null<HistoryItem*> item);
 	void unregisterClientSideMessage(not_null<HistoryItem*> item);
@@ -236,6 +248,8 @@ public:
 	[[nodiscard]] bool loadedAtBottom() const; // last message is in the list
 	void setNotLoadedAtBottom();
 	[[nodiscard]] bool loadedAtTop() const; // nothing was added after loading history back
+	[[nodiscard]] bool hasGuestChatBotMessages() const;
+	void setHasGuestChatBotMessages();
 	[[nodiscard]] bool isReadyFor(MsgId msgId); // has messages for showing history at msgId
 	void getReadyFor(MsgId msgId);
 
@@ -244,6 +258,7 @@ public:
 	[[nodiscard]] bool lastMessageKnown() const;
 	[[nodiscard]] bool lastServerMessageKnown() const;
 	void unknownMessageDeleted(MsgId messageId);
+	[[nodiscard]] bool isUnknownMessageDeleted(MsgId messageId) const;
 	void applyDialogTopMessage(MsgId topMessageId);
 	void applyDialog(Data::Folder *requestFolder, const MTPDdialog &data);
 	void applyPinnedUpdate(const MTPDupdateDialogPinned &data);
@@ -288,6 +303,11 @@ public:
 	void clearUnreadReactionsFor(
 		MsgId topicRootId,
 		Data::SavedSublist *sublist);
+	void clearUnreadPollVotesFor(MsgId topicRootId);
+
+	[[nodiscard]] int unreadPollVotesCount() const;
+	void setUnreadPollVotesCount(int count);
+	[[nodiscard]] rpl::producer<int> unreadPollVotesCountChanges() const;
 
 	Data::Draft *draft(Data::DraftKey key) const;
 	void setDraft(Data::DraftKey key, std::unique_ptr<Data::Draft> &&draft);
@@ -409,6 +429,7 @@ public:
 		PeerId dataPeerId,
 		const MTPmessages_Messages &data);
 
+	void viewHeightAdjusted(not_null<Element*> view, int delta);
 	void forgetScrollState() {
 		scrollTopItem = nullptr;
 	}
@@ -434,7 +455,10 @@ public:
 	void tryMarkMonoforumIntervalRead(
 		MsgId wasInboxReadBefore,
 		MsgId nowInboxReadBefore);
-	void validateMonoforumUnread(MsgId readTillId);
+	void tryMarkForumIntervalRead(
+		MsgId wasInboxReadBefore,
+		MsgId nowInboxReadBefore);
+	void validateMonoAndForumUnread(MsgId readTillId);
 
 	[[nodiscard]] bool isTopPromoted() const;
 
@@ -444,6 +468,8 @@ public:
 	[[nodiscard]] LanguageId translatedTo() const;
 
 	[[nodiscard]] HistoryTranslation *translation() const;
+
+	void refreshHiddenLinksItems();
 
 	const not_null<PeerData*> peer;
 
@@ -480,7 +506,8 @@ private:
 		FakeUnreadWhileOpened = (1 << 5),
 		HasPinnedMessages = (1 << 6),
 		ResolveChatListMessage = (1 << 7),
-		MonoforumUnreadInvalidatePending = (1 << 8),
+		MonoAndForumUnreadInvalidatePending = (1 << 8),
+		HasGuestChatBotMessages = (1 << 9),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) {
@@ -542,6 +569,7 @@ private:
 	void mainViewRemoved(
 		not_null<HistoryBlock*> block,
 		not_null<Element*> view);
+	void mainViewHeightAdjusted(not_null<Element*> view, int delta);
 
 	TimeId adjustedChatListTimeId() const override;
 	void changedChatListPinHook() override;
@@ -602,10 +630,14 @@ private:
 	[[nodiscard]] Dialogs::BadgesState adjustBadgesStateByFolder(
 		Dialogs::BadgesState state) const;
 	[[nodiscard]] Dialogs::UnreadState computeUnreadState() const;
+	[[nodiscard]] Dialogs::UnreadState withMyMuted(
+		Dialogs::UnreadState state) const;
 	void setFolderPointer(Data::Folder *folder);
 
 	void hasUnreadMentionChanged(bool has) override;
 	void hasUnreadReactionChanged(bool has) override;
+	void hasUnreadPollVoteChanged(bool has) override;
+	[[nodiscard]] bool useMyUnreadInParent() const;
 
 	const std::unique_ptr<HistoryMainElementDelegateMixin> _delegateMixin;
 
@@ -625,12 +657,15 @@ private:
 	std::optional<MsgId> _inboxReadBefore;
 	std::optional<MsgId> _outboxReadBefore;
 	std::optional<int> _unreadCount;
+	int _unreadPollVotesCount = 0;
+	rpl::event_stream<int> _unreadPollVotesCountChanges;
 	std::optional<HistoryItem*> _lastMessage;
 	std::optional<HistoryItem*> _lastServerMessage;
 	base::flat_set<not_null<HistoryItem*>> _clientSideMessages;
 	std::unordered_set<std::unique_ptr<HistoryItem>> _items;
 
 	std::unique_ptr<Data::HistoryMessages> _messages;
+	std::unique_ptr<HistoryStreamedDrafts> _streamedDrafts;
 
 	// This almost always is equal to _lastMessage. The only difference is
 	// for a group that migrated to a supergroup. Then _lastMessage can
@@ -653,6 +688,8 @@ private:
 	base::flat_map<Data::DraftKey, TimeId> _acceptCloudDraftsAfter;
 	base::flat_map<Data::DraftKey, int> _savingCloudDraftRequests;
 	base::flat_map<Data::DraftKey, Data::ForwardDraft> _forwardDrafts;
+
+	base::flat_map<MsgId, TimeId> _unknownDeletedMessages;
 
 	QString _topPromotedMessage;
 	QString _topPromotedType;

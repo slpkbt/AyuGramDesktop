@@ -33,6 +33,10 @@ public:
 		not_null<HistoryItem*> data,
 		Element *replacing);
 
+	void clickHandlerPressedChanged(
+		const ClickHandlerPtr &handler,
+		bool pressed) override;
+
 	int marginTop() const override;
 	int marginBottom() const override;
 	bool isHidden() const override;
@@ -117,12 +121,14 @@ public:
 		int left,
 		int width,
 		const Ui::Text::String &text,
-		const QRect &textRect);
+		const QRect &textRect,
+		int lastLineWidthAdd = 0);
 
 private:
 	static std::vector<int> CountLineWidths(
 		const Ui::Text::String &text,
-		const QRect &textRect);
+		const QRect &textRect,
+		int lastLineWidthAdd = 0);
 
 };
 

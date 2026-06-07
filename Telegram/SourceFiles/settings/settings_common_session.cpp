@@ -8,20 +8,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common_session.h"
 
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
-#include "settings/settings_chat.h"
-#include "settings/settings_main.h"
+#include "settings/settings_experimental.h"
+#include "settings/sections/settings_chat.h"
+#include "settings/sections/settings_main.h"
 
 // AyuGram includes
-#include "ayu/ui/settings/settings_ayu.h"
+#include "ayu/ui/settings/settings_filters.h"
 
 
 namespace Settings {
 
 bool HasMenu(Type type) {
 	return (type == ::Settings::CloudPasswordEmailConfirmId())
-		|| (type == Main::Id())
-		|| (type == Chat::Id())
-		|| (type == Ayu::Id());
+		|| (type == MainId())
+		|| (type == ChatId())
+		|| (type == Experimental::Id())
+		|| (type == AyuFiltersId());
 }
 
 } // namespace Settings

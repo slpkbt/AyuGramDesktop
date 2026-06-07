@@ -36,6 +36,12 @@ public:
 		return top();
 	}
 	[[nodiscard]] virtual rpl::producer<QString> button() = 0;
+
+	// For now only subtitle() changes are observed.
+	[[nodiscard]] virtual rpl::producer<> changes() {
+		return nullptr;
+	}
+
 	[[nodiscard]] virtual auto buttonMinistars()
 	-> std::optional<Ui::Premium::MiniStarsType> {
 		return std::nullopt;
@@ -97,6 +103,7 @@ public:
 		return _content->hideServiceText();
 	}
 	void hideSpoilers() override;
+	void revealSpoilers() override;
 
 	bool hasHeavyPart() const override;
 	void unloadHeavyPart() override;
@@ -104,6 +111,8 @@ public:
 private:
 	[[nodiscard]] QRect buttonRect() const;
 	[[nodiscard]] QRect contentRect() const;
+
+	void applyContentChanges();
 
 	const not_null<Element*> _parent;
 	const std::unique_ptr<ServiceBoxContent> _content;
@@ -131,8 +140,8 @@ private:
 	Ui::Text::String _title;
 	Ui::Text::String _author;
 	Ui::Text::String _subtitle;
-	const QSize _size;
-	const QSize _innerSize;
+	QSize _size;
+	QSize _innerSize;
 	rpl::lifetime _lifetime;
 
 };

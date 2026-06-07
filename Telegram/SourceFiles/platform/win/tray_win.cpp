@@ -85,8 +85,7 @@ bool DarkTasbarValueValid/* = false*/;
 
 	static const auto Content = [&] {
 		auto f = QFile(u":/gui/icons/tray/monochrome.svg"_q);
-		f.open(QIODevice::ReadOnly);
-		return f.readAll();
+		return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
 	}();
 	static auto Mask = QImage();
 	static auto Size = 0;
@@ -117,7 +116,7 @@ bool DarkTasbarValueValid/* = false*/;
 	p.setPen(Qt::NoPen);
 	p.drawEllipse(QRectF( // cx=3.9, cy=12.7, r=2.2
 		1.7 * xm,
-		10.5 * ym,
+		9.5 * ym,
 		4.4 * xm,
 		4.4 * ym));
 	return image;
@@ -136,6 +135,7 @@ bool DarkTasbarValueValid/* = false*/;
 	static auto lastUsedIcon = AyuAssets::currentAppLogoName();
 
 	if (lastUsedIcon != AyuAssets::currentAppLogoName()) {
+		lastUsedIcon = AyuAssets::currentAppLogoName();
 		ScaledLogo = base::flat_map<int, QImage>();
 		ScaledLogoNoMargin = base::flat_map<int, QImage>();
 		ScaledLogoDark = base::flat_map<int, QImage>();
@@ -143,7 +143,7 @@ bool DarkTasbarValueValid/* = false*/;
 	}
 
 	const auto &settings = AyuSettings::getInstance();
-	if (settings.hideNotificationBadge) {
+	if (settings.hideNotificationBadge()) {
 		args.count = 0;
 	}
 
@@ -224,7 +224,7 @@ void Tray::createIcon() {
 			&QPlatformSystemTrayIcon::contextMenuRequested
 		) | rpl::filter([=] {
 			return _menu != nullptr;
-		}) | rpl::start_with_next([=](
+		}) | rpl::on_next([=](
 				QPoint globalNativePosition,
 				const QPlatformScreen *screen) {
 			_aboutToShowRequests.fire({});
@@ -292,7 +292,7 @@ void Tray::addAction(rpl::producer<QString> text, Fn<void()> &&callback) {
 	auto callbackLater = crl::guard(_menu.get(), [=] {
 		using namespace rpl::mappers;
 		_callbackFromTrayLifetime = _menu->shownValue(
-		) | rpl::filter(!_1) | rpl::take(1) | rpl::start_with_next([=] {
+		) | rpl::filter(!_1) | rpl::take(1) | rpl::on_next([=] {
 			callback();
 		});
 	});
@@ -300,7 +300,7 @@ void Tray::addAction(rpl::producer<QString> text, Fn<void()> &&callback) {
 	const auto action = _menu->addAction(QString(), std::move(callbackLater));
 	std::move(
 		text
-	) | rpl::start_with_next([=](const QString &text) {
+	) | rpl::on_next([=](const QString &text) {
 		action->setText(text);
 	}, _actionsLifetime);
 }

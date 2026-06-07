@@ -28,6 +28,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_response.h"
 #include "boxes/abstract_box.h" // Ui::show().
 
+// AyuGram includes
+#include "ayu/utils/telegram_helpers.h"
+
+
 namespace Api {
 namespace {
 
@@ -114,9 +118,10 @@ mtpRequestId SuggestMedia(
 	const auto api = &session->api();
 
 	const auto text = textWithEntities.text;
+	const auto textNormalized = reverseLocalPremiumEmoji(textWithEntities, item->history());
 	const auto sentEntities = EntitiesToMTP(
 		session,
-		textWithEntities.entities,
+		textNormalized.entities,
 		ConvertOption::SkipLocal);
 
 	const auto updateRecentStickers = inputMedia
@@ -146,7 +151,7 @@ mtpRequestId SuggestMedia(
 	const auto randomId = base::RandomValue<uint64>();
 	return api->request(MTPmessages_SendMedia(
 		MTP_flags(flags),
-		item->history()->peer->input,
+		item->history()->peer->input(),
 		ReplyToForMTP(item->history(), replyTo),
 		inputMedia.value_or(Data::WebPageForMTP(webpage, text.isEmpty())),
 		MTP_string(text),
@@ -154,6 +159,7 @@ mtpRequestId SuggestMedia(
 		MTPReplyMarkup(),
 		sentEntities,
 		MTPint(), // schedule_date
+		MTPint(), // schedule_repeat_period
 		MTPInputPeer(), // send_as
 		MTPInputQuickReplyShortcut(), // quick_reply_shortcut
 		MTPlong(), // effect
@@ -206,7 +212,8 @@ mtpRequestId SuggestMessageOrMedia(
 			inputMedia = MTP_inputMediaPhoto(
 				MTP_flags(0),
 				photo->mtpInput(),
-				MTPint()); // ttl_seconds
+				MTPint(), // ttl_seconds
+				MTPInputDocument()); // video
 		} else if (const auto document = wasMedia->document()) {
 			inputMedia = MTP_inputMediaDocument(
 				MTP_flags(0),
@@ -261,9 +268,10 @@ mtpRequestId EditMessage(
 	const auto api = &session->api();
 
 	const auto text = textWithEntities.text;
+	const auto textNormalized = reverseLocalPremiumEmoji(textWithEntities, item->history());
 	const auto sentEntities = EntitiesToMTP(
 		session,
-		textWithEntities.entities,
+		textNormalized.entities,
 		ConvertOption::SkipLocal);
 	const auto media = item->media();
 
@@ -295,6 +303,9 @@ mtpRequestId EditMessage(
 		| (options.scheduled
 			? MTPmessages_EditMessage::Flag::f_schedule_date
 			: emptyFlag)
+		| ((options.scheduled && options.scheduleRepeatPeriod)
+			? MTPmessages_EditMessage::Flag::f_schedule_repeat_period
+			: emptyFlag)
 		| (item->isBusinessShortcut()
 			? MTPmessages_EditMessage::Flag::f_quick_reply_shortcut_id
 			: emptyFlag);
@@ -306,13 +317,14 @@ mtpRequestId EditMessage(
 		: item->id;
 	return api->request(MTPmessages_EditMessage(
 		MTP_flags(flags),
-		item->history()->peer->input,
+		item->history()->peer->input(),
 		MTP_int(id),
 		MTP_string(text),
 		inputMedia.value_or(Data::WebPageForMTP(webpage, text.isEmpty())),
 		MTPReplyMarkup(),
 		sentEntities,
 		MTP_int(options.scheduled),
+		MTP_int(options.scheduleRepeatPeriod),
 		MTP_int(item->shortcutId())
 	)).done([=](
 			const MTPUpdates &result,
@@ -474,7 +486,8 @@ mtpRequestId EditTextMessage(
 				return MTP_inputMediaPhoto(
 					MTP_flags(flags),
 					photo->mtpInput(),
-					MTP_int(media->ttlSeconds()));
+					MTP_int(media->ttlSeconds()),
+					MTPInputDocument()); // video
 			};
 			takeFileReference = [=] { return photo->fileReference(); };
 		} else if (const auto document = media->document()) {

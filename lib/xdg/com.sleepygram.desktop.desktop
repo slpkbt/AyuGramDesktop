@@ -1,0 +1,22 @@
+[Desktop Entry]
+Name=SleepyGram Desktop
+Comment=Desktop version of SleepyGram
+TryExec=SleepyGram
+Exec=env DESKTOPINTEGRATION=1 SleepyGram -- %U
+Icon=com.sleepygram.desktop
+Terminal=false
+StartupWMClass=SleepyGram
+Type=Application
+Categories=Chat;Network;InstantMessaging;Qt;
+MimeType=x-scheme-handler/tg;x-scheme-handler/tonsite;
+Keywords=tg;chat;im;messaging;messenger;sms;telegram;tdesktop;
+Actions=quit;
+DBusActivatable=true
+SingleMainWindow=true
+X-GNOME-UsesNotifications=true
+X-GNOME-SingleWindow=true
+
+[Desktop Action quit]
+Exec=SleepyGram -quit
+Name=Quit SleepyGram
+Icon=application-exit

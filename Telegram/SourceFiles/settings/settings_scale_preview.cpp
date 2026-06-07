@@ -31,6 +31,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 
+// AyuGram includes
+#include "ayu/ui/ayu_userpic.h"
+
+
 namespace Settings {
 namespace {
 
@@ -138,7 +142,7 @@ Preview::Preview(QWidget *slider, rpl::producer<QImage> userpic)
 , _slider(slider)
 , _ratio(style::DevicePixelRatio())
 , _window(Ui::Platform::TranslucentWindowsSupported()) {
-	std::move(userpic) | rpl::start_with_next([=](QImage &&userpic) {
+	std::move(userpic) | rpl::on_next([=](QImage &&userpic) {
 		_userpicOriginal = std::move(userpic);
 		if (!_userpicImage.isNull()) {
 			_userpicImage = {};
@@ -282,13 +286,13 @@ void Preview::init() {
 	});
 
 	_widget.paintRequest(
-	) | rpl::start_with_next([=](QRect clip) {
+	) | rpl::on_next([=](QRect clip) {
 		auto p = Painter(&_widget);
 		paint(p, clip);
 	}, _widget.lifetime());
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_bubbleCorners = {};
 		_bubbleTail = {};
 		_bubbleShadowBottomRight = {};
@@ -745,10 +749,19 @@ void Preview::validateUserpicCache() {
 		|| _userpic.isEmpty()) {
 		return;
 	}
-	_userpicImage = Images::Circle(_userpicOriginal.scaled(
+	auto scaled = _userpicOriginal.scaled(
 		_userpic.size() * _ratio,
 		Qt::IgnoreAspectRatio,
-		Qt::SmoothTransformation));
+		Qt::SmoothTransformation);
+	if (AyuUserpic::IsCircle()) {
+		_userpicImage = Images::Circle(std::move(scaled));
+	} else {
+		const auto r = AyuUserpic::ComputeRadius(
+			std::min(scaled.width(), scaled.height()));
+		_userpicImage = Images::Round(
+			std::move(scaled),
+			Images::CornersMask(r));
+	}
 	_userpicImage.setDevicePixelRatio(_ratio);
 }
 

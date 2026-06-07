@@ -27,8 +27,7 @@ class DeleteMessagesBox final : public Ui::BoxContent {
 public:
 	DeleteMessagesBox(
 		QWidget*,
-		not_null<HistoryItem*> item,
-		bool suggestModerateActions);
+		not_null<HistoryItem*> item);
 	DeleteMessagesBox(
 		QWidget*,
 		not_null<Main::Session*> session,
@@ -58,6 +57,7 @@ private:
 	void deleteAndClear();
 	[[nodiscard]] PeerData *checkFromSinglePeer() const;
 	[[nodiscard]] bool hasScheduledMessages() const;
+	[[nodiscard]] bool hasSavedMusicMessages() const;
 	[[nodiscard]] std::optional<RevokeConfig> revokeText(
 		not_null<PeerData*> peer) const;
 	[[nodiscard]] PaidPostType paidPostType() const;
@@ -69,19 +69,13 @@ private:
 	const QDate _wipeHistoryFirstToDelete;
 	const QDate _wipeHistoryLastToDelete;
 	const MessageIdsList _ids;
-	PeerData *_moderateFrom = nullptr;
-	ChannelData *_moderateInChannel = nullptr;
-	bool _moderateBan = false;
-	bool _moderateDeleteAll = false;
 
 	bool _revokeForBot = false;
+	bool _revokeJustClearForChannel = false;
 
 	object_ptr<Ui::FlatLabel> _text = { nullptr };
 	object_ptr<Ui::Checkbox> _revoke = { nullptr };
 	object_ptr<Ui::SlideWrap<Ui::Checkbox>> _revokeRemember = { nullptr };
-	object_ptr<Ui::Checkbox> _banUser = { nullptr };
-	object_ptr<Ui::Checkbox> _reportSpam = { nullptr };
-	object_ptr<Ui::Checkbox> _deleteAll = { nullptr };
 	object_ptr<Ui::LinkButton> _autoDeleteSettings = { nullptr };
 
 	int _fullHeight = 0;

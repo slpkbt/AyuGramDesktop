@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/effects/outline_segments.h"
 
+// AyuGram includes
+#include "ayu/ui/ayu_userpic.h"
+
+
 namespace Ui {
 
 void PaintOutlineSegments(
@@ -15,6 +19,12 @@ void PaintOutlineSegments(
 		const std::vector<OutlineSegment> &segments,
 		float64 fromFullProgress) {
 	Expects(!segments.empty());
+
+	if (!AyuUserpic::IsCircle()) {
+		const auto r = AyuUserpic::ComputeRadiusF(std::min(ellipse.width(), ellipse.height()));
+		PaintOutlineSegments(p, ellipse, r, segments);
+		return;
+	}
 
 	p.setBrush(Qt::NoBrush);
 	const auto count = std::min(int(segments.size()), kOutlineSegmentsMax);
@@ -85,13 +95,20 @@ void PaintOutlineSegments(
 	}
 }
 
-QLinearGradient UnreadStoryOutlineGradient(QRectF rect) {
+QLinearGradient UnreadStoryOutlineGradient(
+		QRectF rect,
+		const QColor &c1,
+		const QColor &c2) {
 	auto result = QLinearGradient(rect.topRight(), rect.bottomLeft());
-	result.setStops({
-		{ 0., st::groupCallLive1->c },
-		{ 1., st::groupCallMuted1->c },
-	});
+	result.setStops({ { 0., c1 }, { 1., c2 } });
 	return result;
+}
+
+QLinearGradient UnreadStoryOutlineGradient(QRectF rect) {
+	return UnreadStoryOutlineGradient(
+		std::move(rect),
+		st::groupCallLive1->c,
+		st::groupCallMuted1->c);
 }
 
 } // namespace Ui

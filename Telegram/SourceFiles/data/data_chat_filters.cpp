@@ -234,13 +234,13 @@ MTPDialogFilter ChatFilter::tl(FilterId replaceId) const {
 	auto pinned = QVector<MTPInputPeer>();
 	pinned.reserve(_pinned.size());
 	for (const auto &history : _pinned) {
-		pinned.push_back(history->peer->input);
+		pinned.push_back(history->peer->input());
 		always.remove(history);
 	}
 	auto include = QVector<MTPInputPeer>();
 	include.reserve(always.size());
 	for (const auto &history : always) {
-		include.push_back(history->peer->input);
+		include.push_back(history->peer->input());
 	}
 	auto title = MTP_textWithEntities(
 		MTP_string(_title.text),
@@ -279,7 +279,7 @@ MTPDialogFilter ChatFilter::tl(FilterId replaceId) const {
 	auto never = QVector<MTPInputPeer>();
 	never.reserve(_never.size());
 	for (const auto &history : _never) {
-		never.push_back(history->peer->input);
+		never.push_back(history->peer->input());
 	}
 	return MTP_dialogFilter(
 		MTP_flags(flags),
@@ -390,6 +390,28 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 , _moreChatsTimer([=] { checkLoadMoreChatsLists(); }) {
 	_list.emplace_back();
 	crl::on_main(&owner->session(), [=] { load(); });
+
+	AyuSettings::getInstance().hideAllChatsFolderChanges()
+	| rpl::on_next([=](bool hide) {
+		if (!_loaded) {
+			return;
+		}
+		if (hide) {
+			if (_list.size() <= 1) {
+				return;
+			}
+			const auto it = ranges::find(_list, FilterId(0), &ChatFilter::id);
+			if (it != end(_list)) {
+				_list.erase(it);
+				_listChanged.fire({});
+			}
+		} else {
+			if (!ranges::contains(_list, FilterId(0), &ChatFilter::id)) {
+				_list.insert(begin(_list), ChatFilter());
+				_listChanged.fire({});
+			}
+		}
+	}, _lifetime);
 }
 
 ChatFilters::~ChatFilters() = default;
@@ -494,7 +516,7 @@ void ChatFilters::received(const QVector<MTPDialogFilter> &list) {
 	auto changed = false;
 	for (const auto &filter : list) {
 		auto parsed = ChatFilter::FromTL(filter, _owner);
-		if (settings.hideAllChatsFolder && parsed.id() == 0 && list.size() > 1) {
+		if (settings.hideAllChatsFolder() && parsed.id() == 0 && list.size() > 1) {
 			continue;
 		}
 		const auto b = begin(_list) + position;
@@ -518,7 +540,7 @@ void ChatFilters::received(const QVector<MTPDialogFilter> &list) {
 		applyRemove(position);
 		changed = true;
 	}
-	if (!settings.hideAllChatsFolder && !ranges::contains(begin(_list), end(_list), 0, &ChatFilter::id)) {
+	if (!settings.hideAllChatsFolder() && !ranges::contains(begin(_list), end(_list), 0, &ChatFilter::id)) {
 		_list.insert(begin(_list), ChatFilter());
 	}
 	if (changed || !_loaded || _reloading) {
@@ -535,7 +557,7 @@ void ChatFilters::apply(const MTPUpdate &update) {
 	update.match([&](const MTPDupdateDialogFilter &data) {
 		if (const auto filter = data.vfilter()) {
 			auto parsed = ChatFilter::FromTL(*filter, _owner);
-			if (settings.hideAllChatsFolder && parsed.id() == 0) {
+			if (settings.hideAllChatsFolder() && parsed.id() == 0) {
 				return;
 			}
 			set(parsed);
@@ -918,7 +940,7 @@ FilterId ChatFilters::lookupId(int index) const {
 
 	const auto &settings = AyuSettings::getInstance();
 
-	if (_owner->session().user()->isPremium() || !_list.front().id() || settings.hideAllChatsFolder) {
+	if (_owner->session().user()->isPremium() || !_list.front().id() || settings.hideAllChatsFolder()) {
 		return _list[index].id();
 	}
 	const auto i = ranges::find(_list, FilterId(0), &ChatFilter::id);
@@ -966,7 +988,7 @@ bool ChatFilters::loadNextExceptions(bool chatsListLoaded) {
 			for (const auto &history : i->always()) {
 				if (!history->folderKnown()) {
 					inputs.push_back(
-						MTP_inputDialogPeer(history->peer->input));
+						MTP_inputDialogPeer(history->peer->input()));
 				}
 			}
 		}
@@ -1069,7 +1091,7 @@ rpl::producer<Ui::MoreChatsBarContent> ChatFilters::moreChatsContent(
 
 		_moreChatsUpdated.events_starting_with_copy(
 			id
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			consumer.put_next(Ui::MoreChatsBarContent{
 				.count = int(moreChats(id).size()),
 			});

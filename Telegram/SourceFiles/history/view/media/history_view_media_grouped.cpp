@@ -27,6 +27,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "layout/layout_selection.h"
 #include "styles/style_chat.h"
 
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+#include "ayu/features/message_shot/message_shot.h"
+
+
 namespace HistoryView {
 namespace {
 
@@ -145,6 +150,13 @@ QSize GroupedMedia::countOptimalSize() {
 			media->setBubbleRounding(bubbleRounding());
 			media->initDimensions();
 			accumulate_max(maxWidth, media->maxWidth());
+		}
+		auto index = 0;
+		for (const auto &part : _parts) {
+			const auto last = (++index == _parts.size());
+			accumulate_max(
+				maxWidth,
+				part.content->widenGroupingMaxWidth(maxWidth, last));
 		}
 	}
 	auto index = 0;
@@ -301,6 +313,15 @@ QMargins GroupedMedia::groupedPadding() const {
 		(normal.bottom() - grouped.bottom()) + addToBottom);
 }
 
+QRect GroupedMedia::groupItemRect(int index) const {
+	if (index >= 0 && index < int(_parts.size())) {
+		return _parts[index].geometry.translated(
+			0,
+			groupedPadding().top());
+	}
+	return {};
+}
+
 Media *GroupedMedia::lookupSpoilerTagMedia() const {
 	if (_parts.empty()) {
 		return nullptr;
@@ -404,6 +425,28 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	const auto tagged = lookupSpoilerTagMedia();
 	auto fullRect = QRect();
 	const auto subpartHighlight = IsSubGroupSelection(highlight);
+
+	auto anyDeleted = false;
+	const auto &settings = AyuSettings::getInstance();
+	const auto perItemOpacityEnabled = settings.semiTransparentDeletedMessages();
+	if (!perItemOpacityEnabled) {
+		for (const auto &part : _parts) {
+			part.deletedAnimation.stop();
+		}
+	}
+	if (perItemOpacityEnabled) {
+		for (const auto &part : _parts) {
+			if (part.item->isDeleted()) {
+				anyDeleted = true;
+			}
+		}
+	}
+	const auto perItemDeletedOpacity = perItemOpacityEnabled
+		&& anyDeleted;
+	const auto elementDeletedOpacity = perItemDeletedOpacity
+		? _parent->deletedOpacity()
+		: 1.;
+
 	for (auto i = 0, count = int(_parts.size()); i != count; ++i) {
 		const auto &part = _parts[i];
 		auto partContext = context.withSelection(fullSelection
@@ -430,15 +473,50 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		if (!part.cache.isNull()) {
 			wasCache = true;
 		}
-		part.content->drawGrouped(
-			p,
-			partContext,
-			part.geometry.translated(0, groupPadding.top()),
-			part.sides,
-			applyRoundingSides(rounding, part.sides),
-			highlightOpacity,
-			&part.cacheKey,
-			&part.cache);
+		if (perItemDeletedOpacity && part.item->isDeleted()) {
+			if (part.item->wasDeletedAnimated()
+				&& !part.deletedAnimation.animating()) {
+				part.deletedAnimation.start(
+					[parent = _parent] {
+						if (!AyuSettings::getInstance().semiTransparentDeletedMessages()) {
+							return false;
+						}
+						parent->repaint();
+						return true;
+					},
+					1.,
+					0.7,
+					500,
+					anim::easeOutCubic);
+				part.item->markDeletedAnimated();
+			}
+			const auto itemOpacity = part.deletedAnimation.value(0.7);
+			const auto adjustedOpacity = (elementDeletedOpacity > 0.)
+				? (itemOpacity / elementDeletedOpacity)
+				: 0.;
+			const auto savedOp = p.opacity();
+			p.setOpacity(savedOp * adjustedOpacity);
+			part.content->drawGrouped(
+				p,
+				partContext,
+				part.geometry.translated(0, groupPadding.top()),
+				part.sides,
+				applyRoundingSides(rounding, part.sides),
+				highlightOpacity,
+				&part.cacheKey,
+				&part.cache);
+			p.setOpacity(savedOp);
+		} else {
+			part.content->drawGrouped(
+				p,
+				partContext,
+				part.geometry.translated(0, groupPadding.top()),
+				part.sides,
+				applyRoundingSides(rounding, part.sides),
+				highlightOpacity,
+				&part.cacheKey,
+				&part.cache);
+		}
 		if (!part.cache.isNull()) {
 			nowCache = true;
 		}
@@ -462,7 +540,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	if (_parent->media() == this && (!_parent->hasBubble() || isBubbleBottom())) {
 		auto fullRight = width();
 		auto fullBottom = height();
-		if (needInfoDisplay()) {
+		if (needInfoDisplay() && !AyuFeatures::MessageShot::ignoreRender(AyuFeatures::MessageShot::RenderPart::Date)) {
 			_parent->drawInfo(
 				p,
 				context,
@@ -797,6 +875,12 @@ void GroupedMedia::hideSpoilers() {
 	}
 }
 
+void GroupedMedia::revealSpoilers() {
+	for (const auto &part : _parts) {
+		part.content->revealSpoilers();
+	}
+}
+
 Storage::SharedMediaTypesMask GroupedMedia::sharedMediaTypes() const {
 	return main()->sharedMediaTypes();
 }
@@ -888,6 +972,19 @@ bool GroupedMedia::enforceBubbleWidth() const {
 	return _mode == Mode::Grid;
 }
 
+int GroupedMedia::contributedMaxMonospaceWidth() const {
+	if (_mode != Mode::Column) {
+		return 0;
+	}
+	auto result = 0;
+	for (const auto &part : _parts) {
+		accumulate_max(
+			result,
+			part.content->contributedMaxMonospaceWidth());
+	}
+	return result;
+}
+
 bool GroupedMedia::computeNeedBubble() const {
 	Expects(_mode == Mode::Column || _captionItem.has_value());
 
@@ -910,6 +1007,9 @@ bool GroupedMedia::computeNeedBubble() const {
 }
 
 bool GroupedMedia::needInfoDisplay() const {
+	if (AyuFeatures::MessageShot::isTakingShot()) {
+		return (_mode != Mode::Column);
+	}
 	const auto item = _parent->data();
 	return (_mode != Mode::Column)
 		&& (item->isSending()

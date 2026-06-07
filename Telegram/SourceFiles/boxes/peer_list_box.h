@@ -85,6 +85,12 @@ public:
 
 		return _peer;
 	}
+	// AyuGram
+	void setPeer(not_null<PeerData*> peer) {
+		_peer = peer;
+	}
+	// AyuGram
+
 	[[nodiscard]] PeerListRowId id() const {
 		return _id;
 	}
@@ -124,6 +130,15 @@ public:
 		int nameTop,
 		int nameWidth,
 		int availableWidth,
+		int outerWidth,
+		bool selected);
+
+	virtual int paintNameIconGetLeadingWidth(
+		Painter &p,
+		Fn<void()> repaint,
+		crl::time now,
+		int nameLeft,
+		int nameTop,
 		int outerWidth,
 		bool selected);
 
@@ -223,7 +238,8 @@ public:
 		setCheckedInternal(checked, animated);
 	}
 	void setCustomizedCheckSegments(
-		std::vector<Ui::OutlineSegment> segments);
+		std::vector<Ui::OutlineSegment> segments,
+		bool liveBadge);
 	void setHidden(bool hidden) {
 		_hidden = hidden;
 	}
@@ -371,7 +387,7 @@ public:
 
 	template <typename PeerDataRange>
 	void peerListAddSelectedPeers(PeerDataRange &&range) {
-		for (const auto peer : range) {
+		for (const auto &peer : range) {
 			peerListAddSelectedPeerInBunch(peer);
 		}
 		peerListFinishSelectedRowsBunch();
@@ -485,8 +501,8 @@ public:
 
 	virtual void prepare() = 0;
 
-	virtual void showFinished() {
-	}
+	virtual void showFinished();
+	void setShowFinishedCallback(Fn<void()> callback);
 
 	virtual void rowClicked(not_null<PeerListRow*> row) = 0;
 	virtual void rowMiddleClicked(not_null<PeerListRow*> row) {
@@ -619,6 +635,8 @@ private:
 
 	const style::PeerList *_listSt = nullptr;
 	const style::MultiSelect *_selectSt = nullptr;
+
+	Fn<void()> _showFinished;
 
 	rpl::lifetime _lifetime;
 

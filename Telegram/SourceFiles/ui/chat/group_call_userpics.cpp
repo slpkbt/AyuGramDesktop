@@ -14,6 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
+// AyuGram includes
+#include "ayu/ui/ayu_userpic.h"
+
+
 namespace Ui {
 namespace {
 
@@ -95,7 +99,7 @@ GroupCallUserpics::GroupCallUserpics(
 	_maxWidth = 2 * single + (limit - 1) * (single - shift);
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &userpic : _list) {
 			userpic.cache = QImage();
 		}
@@ -120,7 +124,7 @@ GroupCallUserpics::GroupCallUserpics(
 	rpl::combine(
 		PowerSaving::OnValue(PowerSaving::kCalls),
 		std::move(hideBlobs)
-	) | rpl::start_with_next([=](bool disabled, bool deactivated) {
+	) | rpl::on_next([=](bool disabled, bool deactivated) {
 		const auto hide = disabled || deactivated;
 
 		if (!(hide && _speakingAnimationHideLastTime)) {
@@ -273,7 +277,7 @@ void GroupCallUserpics::validateCache(Userpic &userpic) {
 			p.setCompositionMode(QPainter::CompositionMode_Source);
 			p.setBrush(Qt::transparent);
 			p.setPen(pen);
-			p.drawEllipse(skip - size + shift, skip, size, size);
+			AyuUserpic::PaintShape(p, QRectF(skip - size + shift, skip, size, size));
 		}
 	}
 }

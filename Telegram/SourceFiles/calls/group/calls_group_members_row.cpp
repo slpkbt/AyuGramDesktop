@@ -20,6 +20,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_video_track.h"
 #include "styles/style_calls.h"
 
+// AyuGram includes
+#include "ayu/ui/ayu_userpic.h"
+
+
 namespace Calls::Group {
 namespace {
 
@@ -106,7 +110,7 @@ MembersRow::BlobsAnimation::BlobsAnimation(
 	float maxLevel)
 : blobs(std::move(blobDatas), levelDuration, maxLevel) {
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		userpicCache = QImage();
 	}, lifetime);
 }
@@ -215,7 +219,7 @@ void MembersRow::setSpeaking(bool speaking) {
 		_statusIcon->arcs.setStrokeRatio(kArcsStrokeRatio);
 		_statusIcon->arcsWidth = _statusIcon->arcs.finishedWidth();
 		_statusIcon->arcs.startUpdateRequests(
-		) | rpl::start_with_next([=] {
+		) | rpl::on_next([=] {
 			if (!_statusIcon->arcsAnimation.animating()) {
 				_statusIcon->wasArcsWidth = _statusIcon->arcsWidth;
 			}
@@ -407,7 +411,28 @@ void MembersRow::paintBlobs(
 			st::groupCallMemberInactiveStatus,
 			st::groupCallMemberActiveStatus,
 			_speakingAnimation.value(_speaking ? 1. : 0.));
-	_blobsAnimation->blobs.paint(p, brush);
+	if (AyuUserpic::IsCircle()) {
+		_blobsAnimation->blobs.paint(p, brush);
+	} else {
+		const auto level = _blobsAnimation->blobs.currentLevel();
+		const auto blobs = RowBlobs();
+		for (const auto &blob : blobs) {
+			const auto scale = blob.minScale + (1. - blob.minScale) * level;
+			const auto radius = blob.maxRadius;
+			const auto rectSize = 2. * radius;
+			const auto cornerRadius = AyuUserpic::ComputeRadiusF(rectSize);
+			p.save();
+			p.scale(scale, scale);
+			p.setOpacity(p.opacity() * blob.alpha);
+			p.setPen(Qt::NoPen);
+			p.setBrush(brush);
+			p.drawRoundedRect(
+				QRectF(-radius, -radius, rectSize, rectSize),
+				cornerRadius,
+				cornerRadius);
+			p.restore();
+		}
+	}
 	p.translate(-shift);
 	p.setOpacity(1.);
 }
@@ -463,6 +488,12 @@ void MembersRow::paintMuteIcon(
 
 QString MembersRow::generateName() {
 	const auto result = peer()->name();
+	if (result.isEmpty()) {
+		DEBUG_LOG(("UnknownParticipant: %1, Loaded: %2, Name Version: %3"
+			).arg(peerToUser(peer()->id).bare
+			).arg(peer()->isLoaded() ? "TRUE" : "FALSE"
+			).arg(peer()->nameVersion()));
+	}
 	return result.isEmpty()
 		? u"User #%1"_q.arg(peerToUser(peer()->id).bare)
 		: result;

@@ -3,7 +3,7 @@
 // We do not and cannot prevent the use of our code,
 // but be respectful and credit the original author.
 //
-// Copyright @Radolyn, 2025
+// Copyright @Radolyn, 2026
 #include "ayu/ui/message_history/history_inner.h"
 
 #include "apiwrap.h"
@@ -22,6 +22,7 @@
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/file_utilities.h"
+#include "crl/crl_async.h"
 #include "data/data_cloud_file.h"
 #include "data/data_document.h"
 #include "data/data_file_click_handler.h"
@@ -35,9 +36,8 @@
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
-#include "history/admin_log/history_admin_log_filter.h"
+#include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_cursor_state.h"
-#include "history/view/history_view_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/media/history_view_media.h"
 #include "lang/lang_keys.h"
@@ -47,6 +47,7 @@
 #include "styles/style_menu_icons.h"
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/path_shift_gradient.h"
@@ -56,9 +57,6 @@
 
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
-
-#include "history/view/history_view_context_menu.h"
-#include "ui/ui_utility.h"
 
 namespace MessageHistory {
 namespace {
@@ -274,7 +272,7 @@ InnerWidget::InnerWidget(
 	Window::ChatThemeValueFromPeer(
 		controller,
 		peer
-	) | rpl::start_with_next([=](std::shared_ptr<Ui::ChatTheme> &&theme)
+	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme)
 							 {
 								 _theme = std::move(theme);
 								 controller->setChatStyleTheme(_theme);
@@ -287,15 +285,15 @@ InnerWidget::InnerWidget(
 		scrollDateHideByTimer();
 	});
 	session().data().viewRepaintRequest(
-	) | rpl::start_with_next([=](auto view)
+	) | rpl::on_next([=](Data::RequestViewRepaint data)
 							 {
-								 if (view->delegate() == this) {
-									 repaintItem(view);
+								 if (data.view->delegate() == this) {
+									 repaintItem(data.view);
 								 }
 							 },
 							 lifetime());
 	session().data().viewResizeRequest(
-	) | rpl::start_with_next([=](auto view)
+	) | rpl::on_next([=](auto view)
 							 {
 								 if (view->delegate() == this) {
 									 resizeItem(view);
@@ -303,7 +301,7 @@ InnerWidget::InnerWidget(
 							 },
 							 lifetime());
 	session().data().itemViewRefreshRequest(
-	) | rpl::start_with_next([=](auto item)
+	) | rpl::on_next([=](auto item)
 							 {
 								 if (const auto view = viewForItem(item)) {
 									 refreshItem(view);
@@ -311,7 +309,7 @@ InnerWidget::InnerWidget(
 							 },
 							 lifetime());
 	session().data().viewLayoutChanged(
-	) | rpl::start_with_next([=](auto view)
+	) | rpl::on_next([=](auto view)
 							 {
 								 if (view->delegate() == this) {
 									 if (view->isUnderCursor()) {
@@ -321,7 +319,7 @@ InnerWidget::InnerWidget(
 							 },
 							 lifetime());
 	session().data().itemDataChanges(
-	) | rpl::start_with_next([=](not_null<HistoryItem*> item)
+	) | rpl::on_next([=](not_null<HistoryItem*> item)
 							 {
 								 if (const auto view = viewForItem(item)) {
 									 view->itemDataChanged();
@@ -334,7 +332,7 @@ InnerWidget::InnerWidget(
 		{
 			return (_history == query.item->history())
 				&& isVisible();
-		}) | rpl::start_with_next([=](
+		}) | rpl::on_next([=](
 								  const Data::Session::ItemVisibilityQuery &query)
 								  {
 									  if (const auto view = viewForItem(query.item)) {
@@ -347,13 +345,6 @@ InnerWidget::InnerWidget(
 									  }
 								  },
 								  lifetime());
-
-	controller->adaptive().chatWideValue(
-	) | rpl::start_with_next([=](bool wide)
-							 {
-								 _isChatWide = wide;
-							 },
-							 lifetime());
 
 	updateEmptyText();
 }
@@ -472,6 +463,9 @@ void InnerWidget::checkPreloadMore() {
 }
 
 void InnerWidget::updateEmptyText() {
+	// auto text = !_searchQuery.isEmpty()
+	// 	? tr::lng_admin_log_no_results_title(tr::now)
+	// 	: tr::lng_search_messages_none(tr::now);
 	_emptyText.setMarkedText(st::defaultTextStyle, Ui::Text::Semibold(tr::lng_search_messages_none(tr::now)));
 }
 
@@ -545,6 +539,16 @@ void InnerWidget::elementShowPollResults(
 	FullMsgId context) {
 }
 
+void InnerWidget::elementShowAddPollOption(
+	not_null<Element*> view,
+	not_null<PollData*> poll,
+	FullMsgId context,
+	QRect optionRect) {
+}
+
+void InnerWidget::elementSubmitAddPollOption(FullMsgId context) {
+}
+
 void InnerWidget::elementOpenPhoto(
 	not_null<PhotoData*> photo,
 	FullMsgId context) {
@@ -595,8 +599,7 @@ void InnerWidget::elementHandleViaClick(not_null<UserData*> bot) {
 }
 
 HistoryView::ElementChatMode InnerWidget::elementChatMode() {
-	using Mode = HistoryView::ElementChatMode;
-	return _isChatWide ? Mode::Wide : Mode::Default;
+	return HistoryView::ElementChatMode::Wide;
 }
 
 not_null<Ui::PathShiftGradient*> InnerWidget::elementPathShiftGradient() {
@@ -631,6 +634,17 @@ bool InnerWidget::elementHideTopicButton(not_null<const Element*> view) {
 }
 
 void InnerWidget::saveState(not_null<SectionMemento*> memento) {
+	if (!_item) {
+		memento->setItems({}, {}, false, true);
+		memento->setSearchQuery(base::take(_searchQuery));
+		_items.clear();
+		_messageIds.clear();
+		_itemsByData.clear();
+		_upLoaded = false;
+		_downLoaded = true;
+		return;
+	}
+
 	for (auto &item : _items) {
 		item.clearView();
 	}
@@ -639,11 +653,27 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 		base::take(_messageIds),
 		_upLoaded,
 		_downLoaded);
+	memento->setSearchQuery(base::take(_searchQuery));
 	base::take(_itemsByData);
 	_upLoaded = _downLoaded = true; // Don't load or handle anything anymore.
 }
 
 void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
+	if (!_item) {
+		_items.clear();
+		_messageIds.clear();
+		_itemsByData.clear();
+		_itemDates.clear();
+		_upLoaded = false;
+		_downLoaded = true;
+		_searchQuery = memento->takeSearchQuery();
+		updateMinMaxIds();
+		updateEmptyText();
+		updateSize();
+		preloadMore(Direction::Up);
+		return;
+	}
+
 	_items = memento->takeItems();
 	for (auto &item : _items) {
 		item.refreshView(this);
@@ -652,32 +682,80 @@ void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
 	_messageIds = memento->takeMessageIds();
 	_upLoaded = memento->upLoaded();
 	_downLoaded = memento->downLoaded();
+	_searchQuery = memento->takeSearchQuery();
 	updateMinMaxIds();
 	updateSize();
 }
 
+void InnerWidget::applySearch(const QString &query) {
+	if (_item) {
+		return;
+	}
+	if (_searchQuery != query) {
+		++_loadRequestNum;
+		_loadingUp = false;
+		_loadingDown = false;
+
+		_searchQuery = query;
+		_upLoaded = false;
+		_downLoaded = true;
+		_items.clear();
+		_messageIds.clear();
+		_itemsByData.clear();
+		_itemDates.clear();
+		updateMinMaxIds();
+		updateEmptyText();
+		updateSize();
+		preloadMore(Direction::Up);
+	}
+}
+
 void InnerWidget::preloadMore(Direction direction) {
 	auto &loadedFlag = (direction == Direction::Up) ? _upLoaded : _downLoaded;
-	if (loadedFlag) {
+	auto &loadingFlag = (direction == Direction::Up) ? _loadingUp : _loadingDown;
+
+	if (loadedFlag || loadingFlag) {
 		return;
 	}
 
-	auto maxId = (direction == Direction::Up) ? _minId : 0;
-	auto minId = (direction == Direction::Up) ? 0 : _maxId;
-	auto perPage = _items.empty() ? kMessagesFirstPage : kMessagesPerPage;
+	loadingFlag = true;
 
-	std::vector<AyuMessageBase> messages;
-	if (_item) {
-		// viewing edited history
-		messages = AyuMessages::getEditedMessages(_item, minId, maxId, perPage);
-	} else {
-		// viewing deleted messages
-		messages = AyuMessages::getDeletedMessages(_peer, _topicId, minId, maxId, perPage);
-	}
+	const auto maxId = (direction == Direction::Up) ? _minId : 0;
+	const auto minId = (direction == Direction::Up) ? 0 : _maxId;
+	const auto perPage = _items.empty() ? kMessagesFirstPage : kMessagesPerPage;
 
-	crl::on_main([=]
-	{
-		addMessages(direction, messages);
+	const auto reqNum = ++_loadRequestNum;
+
+	const auto item = _item;
+	const auto peer = _peer;
+	const auto topicId = _topicId;
+	const auto searchQuery = _searchQuery;
+
+	const auto weak = base::make_weak(this);
+
+	crl::async([=] {
+		std::vector<AyuMessageBase> messages;
+		if (item) { // viewing edited history
+			messages = AyuMessages::getEditedMessages(item, minId, maxId, perPage);
+		} else { // viewing deleted messages
+			messages = AyuMessages::getDeletedMessages(peer, topicId, minId, maxId, perPage, searchQuery);
+		}
+
+		crl::on_main([=, messages = std::move(messages)]() mutable
+		{
+			if (!weak) {
+				return;
+			}
+
+			if (reqNum != _loadRequestNum) {
+				return;
+			}
+
+			auto &loadingFlagRef = (direction == Direction::Up) ? _loadingUp : _loadingDown;
+			loadingFlagRef = false;
+
+			addMessages(direction, messages);
+		});
 	});
 }
 
@@ -784,7 +862,7 @@ void InnerWidget::itemsAdded(Direction direction, int addedCount) {
 }
 
 void InnerWidget::updateSize() {
-	TWidget::resizeToWidth(width());
+	RpWidget::resizeToWidth(width());
 	restoreScrollPosition();
 	updateVisibleTopItem();
 	checkPreloadMore();
@@ -934,7 +1012,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 							(dateTop - st::msgServiceMargin.top());
 						const auto width = view->width();
 						if (const auto date = view->Get<HistoryView::DateBadge>()) {
-							date->paint(p, context.st, dateY, width, _isChatWide);
+							date->paint(p, context.st, dateY, width, true);
 						} else {
 							HistoryView::ServiceMessagePainter::PaintDate(
 								p,
@@ -942,7 +1020,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 								view->dateTime(),
 								dateY,
 								width,
-								_isChatWide);
+								true);
 						}
 					}
 				}
@@ -1361,7 +1439,7 @@ void InnerWidget::mouseReleaseEvent(QMouseEvent *e) {
 
 void InnerWidget::enterEventHook(QEnterEvent *e) {
 	mouseActionUpdate(QCursor::pos());
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void InnerWidget::leaveEventHook(QEvent *e) {
@@ -1375,7 +1453,7 @@ void InnerWidget::leaveEventHook(QEvent *e) {
 		_cursor = style::cur_default;
 		setCursor(_cursor);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void InnerWidget::mouseActionStart(const QPoint &screenPos, Qt::MouseButton button) {
@@ -1489,11 +1567,9 @@ void InnerWidget::mouseActionFinish(const QPoint &screenPos, Qt::MouseButton but
 							 {
 								 button,
 								 QVariant::fromValue(ClickHandlerContext{
-									 .elementDelegate = [weak = Ui::MakeWeak(this)]
+									 .elementDelegate = [weak = base::make_weak(this)]
 									 {
-										 return weak
-													? (ElementDelegate*) weak
-													: nullptr;
+										 return weak.get();
 									 },
 									 .sessionWindow = base::make_weak(_controller),
 								 })

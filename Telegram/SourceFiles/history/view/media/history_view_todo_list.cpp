@@ -42,21 +42,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_todo_lists.h"
 #include "window/window_peer_menu.h"
 #include "styles/style_chat.h"
+#include "styles/style_polls.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
 
 namespace HistoryView {
-namespace {
-
-constexpr auto kShowRecentVotersCount = 3;
-constexpr auto kRotateSegments = 8;
-constexpr auto kRotateAmplitude = 3.;
-constexpr auto kScaleSegments = 2;
-constexpr auto kScaleAmplitude = 0.03;
-constexpr auto kLargestRadialDuration = 30 * crl::time(1000);
-constexpr auto kCriticalCloseDuration = 5 * crl::time(1000);
-
-} // namespace
 
 struct TodoList::Task {
 	Task();
@@ -279,9 +269,11 @@ void TodoList::updateTexts() {
 		_flags = _todolist->flags();
 		_subtitle.setText(
 			st::msgDateTextStyle,
-			(_todolist->othersCanComplete()
-				? tr::lng_todo_title_group(tr::now)
-				: tr::lng_todo_title(tr::now)));
+			(!_todolist->othersCanComplete()
+				? tr::lng_todo_title(tr::now)
+				: _parent->data()->history()->peer->isUser()
+				? tr::lng_todo_title_user(tr::now)
+				: tr::lng_todo_title_group(tr::now)));
 	}
 	updateTasks(skipAnimations);
 }
@@ -315,6 +307,7 @@ void TodoList::updateTasks(bool skipAnimations) {
 		}
 		return;
 	}
+	const auto has = hasHeavyPart();
 	_tasks = ranges::views::all(
 		_todolist->items
 	) | ranges::views::transform([&](const TodoListItem &item) {
@@ -329,14 +322,20 @@ void TodoList::updateTasks(bool skipAnimations) {
 	}
 
 	updateCompletionStatus();
+
+	if (has && !hasHeavyPart()) {
+		_parent->checkHeavyPart();
+	}
 }
 
 ClickHandlerPtr TodoList::createTaskClickHandler(
 		const Task &task) {
 	const auto id = task.id;
-	return std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+	auto result = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
 		toggleCompletion(id);
 	}));
+	result->setProperty(kTodoListItemIdProperty, id);
+	return result;
 }
 
 void TodoList::startToggleAnimation(Task &task) {
@@ -353,7 +352,7 @@ void TodoList::toggleCompletion(int id) {
 		return;
 	} else if (_parent->data()->Has<HistoryMessageForwarded>()) {
 		_parent->delegate()->elementShowTooltip(
-			tr::lng_todo_mark_forwarded(tr::now, Ui::Text::RichLangValue),
+			tr::lng_todo_mark_forwarded(tr::now, tr::rich),
 			[] {});
 		return;
 	} else if (!canComplete()) {
@@ -361,8 +360,8 @@ void TodoList::toggleCompletion(int id) {
 			tr::lng_todo_mark_restricted(
 				tr::now,
 				lt_user,
-				Ui::Text::Bold(_parent->data()->from()->shortName()),
-				Ui::Text::RichLangValue), [] {});
+				tr::bold(_parent->data()->from()->shortName()),
+				tr::rich), [] {});
 		return;
 	} else if (!_parent->history()->session().premium()) {
 		Window::PeerMenuTodoWantsPremium(Window::TodoWantsPremium::Mark);
@@ -375,11 +374,24 @@ void TodoList::toggleCompletion(int id) {
 	if (i == end(_tasks)) {
 		return;
 	}
+
 	const auto selected = (i->completionDate != 0);
 	i->completionDate = selected ? TimeId() : base::unixtime::now();
 	if (!selected) {
 		i->setCompletedBy(_parent->history()->session().user());
 	}
+
+	const auto parentMedia = _parent->data()->media();
+	const auto baseList = parentMedia ? parentMedia->todolist() : nullptr;
+	if (baseList) {
+		const auto j = ranges::find(baseList->items, id, &TodoListItem::id);
+		if (j != end(baseList->items)) {
+			j->completionDate = i->completionDate;
+			j->completedBy = i->completedBy;
+		}
+		history()->owner().updateDependentMessages(_parent->data());
+	}
+
 	startToggleAnimation(*i);
 	repaint();
 
@@ -392,7 +404,8 @@ void TodoList::toggleCompletion(int id) {
 }
 
 void TodoList::maybeStartFireworks() {
-	if (!ranges::contains(_tasks, TimeId(), &Task::completionDate)) {
+	if (!ranges::contains(_tasks, TimeId(), &Task::completionDate)
+		&& !_fireworksAnimation) {
 		_fireworksAnimation = std::make_unique<Ui::FireworksAnimation>(
 			[=] { repaint(); });
 	}
@@ -467,6 +480,7 @@ void TodoList::draw(Painter &p, const PaintContext &context) const {
 			paintw,
 			width(),
 			context);
+		appendTaskHighlight(task.id, tshift, height, context);
 		if (was) {
 			heavy = true;
 		} else if (!task.userpic.null()) {
@@ -488,7 +502,7 @@ void TodoList::paintBottom(
 		const PaintContext &context) const {
 	const auto stringtop = top
 		+ st::msgPadding.bottom()
-		+ st::historyPollBottomButtonTop;
+		+ st::historyChecklistBottomTop;
 	const auto stm = context.messageStyle();
 
 	p.setPen(stm->msgDateFg);
@@ -559,6 +573,33 @@ int TodoList::paintTask(
 		task.name.drawLeft(p, aleft, nameTop, awidth, outerWidth);
 	}
 	return height;
+}
+
+void TodoList::appendTaskHighlight(
+		int id,
+		int top,
+		int height,
+		const PaintContext &context) const {
+	if (context.highlight.todoItemId != id
+		|| context.highlight.collapsion <= 0.) {
+		return;
+	}
+	const auto to = context.highlightInterpolateTo;
+	const auto toProgress = (1. - context.highlight.collapsion);
+	if (toProgress >= 1.) {
+		context.highlightPathCache->addRect(to);
+	} else if (toProgress <= 0.) {
+		context.highlightPathCache->addRect(0, top, width(), height);
+	} else {
+		const auto lerp = [=](int from, int to) {
+			return from + (to - from) * toProgress;
+		};
+		context.highlightPathCache->addRect(
+			lerp(0, to.x()),
+			lerp(top, to.y()),
+			lerp(width(), to.width()),
+			lerp(height, to.height()));
+	}
 }
 
 void TodoList::paintRadio(
@@ -809,6 +850,17 @@ void TodoList::hideSpoilers() {
 	for (auto &task : _tasks) {
 		if (task.text.hasSpoilers()) {
 			task.text.setSpoilerRevealed(false, anim::type::instant);
+		}
+	}
+}
+
+void TodoList::revealSpoilers() {
+	if (_title.hasSpoilers()) {
+		_title.setSpoilerRevealed(true, anim::type::instant);
+	}
+	for (auto &task : _tasks) {
+		if (task.text.hasSpoilers()) {
+			task.text.setSpoilerRevealed(true, anim::type::instant);
 		}
 	}
 }

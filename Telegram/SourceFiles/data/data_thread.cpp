@@ -98,6 +98,22 @@ HistoryUnreadThings::ConstProxy Thread::unreadReactions() const {
 	};
 }
 
+HistoryUnreadThings::Proxy Thread::unreadPollVotes() {
+	return {
+		this,
+		_unreadThings,
+		HistoryUnreadThings::Type::PollVotes,
+		!!(_flags & Flag::UnreadThingsKnown),
+	};
+}
+
+HistoryUnreadThings::ConstProxy Thread::unreadPollVotes() const {
+	return {
+		_unreadThings ? &_unreadThings->pollVotes : nullptr,
+		!!(_flags & Flag::UnreadThingsKnown),
+	};
+}
+
 bool Thread::canToggleUnread(bool nowUnread) const {
 	if ((asTopic() || asForum()) && !nowUnread) {
 		return false;
@@ -123,6 +139,14 @@ const base::flat_set<MsgId> &Thread::unreadReactionsIds() const {
 		return Result;
 	}
 	return _unreadThings->reactions.ids();
+}
+
+const base::flat_set<MsgId> &Thread::unreadPollVotesIds() const {
+	if (!_unreadThings) {
+		static const auto Result = base::flat_set<MsgId>();
+		return Result;
+	}
+	return _unreadThings->pollVotes.ids();
 }
 
 void Thread::clearNotifications() {
@@ -206,11 +230,11 @@ void Thread::setHasPinnedMessages(bool has) {
 }
 
 void Thread::saveMeAsActiveSubsectionThread() {
-	if (const auto channel = owningHistory()->peer->asChannel()) {
-		if (channel->useSubsectionTabs()) {
-			if (const auto forum = channel->forum()) {
-				forum->saveActiveSubsectionThread(this);
-			} else if (const auto monoforum = channel->monoforum()) {
+	if (const auto peer = owningHistory()->peer; peer->useSubsectionTabs()) {
+		if (const auto forum = peer->forum()) {
+			forum->saveActiveSubsectionThread(this);
+		} else if (const auto channel = peer->asChannel()) {
+			if (const auto monoforum = channel->monoforum()) {
 				monoforum->saveActiveSubsectionThread(this);
 			}
 		}

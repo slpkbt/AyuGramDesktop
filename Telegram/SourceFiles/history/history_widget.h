@@ -30,11 +30,14 @@ class Error;
 } // namespace MTP
 
 namespace Data {
+class ForumTopic;
 class PhotoMedia;
+struct DrawToReplyRequest;
 struct SendError;
 } // namespace Data
 
 namespace SendMenu {
+struct Action;
 struct Details;
 } // namespace SendMenu
 
@@ -62,6 +65,7 @@ class DropdownMenu;
 class PlainShadow;
 class IconButton;
 class EmojiButton;
+class RpWidget;
 class SendButton;
 class SilentToggle;
 class FlatButton;
@@ -77,6 +81,7 @@ class SpoilerAnimation;
 class ChooseThemeController;
 class ContinuousScroll;
 struct ChatPaintHighlight;
+class ChatStyle;
 template <typename Widget>
 class SlideWrap;
 } // namespace Ui
@@ -99,6 +104,7 @@ struct FileChosen;
 namespace HistoryView {
 class StickerToast;
 class PaidReactionToast;
+class SelfForwardsTagger;
 class TopBarWidget;
 class PaysStatus;
 class ContactStatus;
@@ -109,7 +115,7 @@ class TranslateBar;
 class ComposeSearch;
 class SubsectionTabs;
 struct SelectedQuote;
-class SuggestOptions;
+class SuggestOptionsBar;
 enum class SuggestMode;
 } // namespace HistoryView
 
@@ -121,6 +127,9 @@ class TTLButton;
 class WebpageProcessor;
 class CharactersLimitLabel;
 class PhotoEditSpoilerManager;
+class ComposeAiButton;
+class ComposeTooltipManager;
+using AiTooltipManager = ComposeTooltipManager;
 struct VoiceToSend;
 } // namespace HistoryView::Controls
 
@@ -160,6 +169,7 @@ public:
 	bool isItemCompletelyHidden(HistoryItem *item) const;
 	void updateTopBarSelection();
 	void updateTopBarChooseForReport();
+	bool handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 
 	void loadMessages();
 	void loadMessagesDown();
@@ -205,8 +215,7 @@ public:
 	void replyToMessage(FullReplyTo id);
 	void replyToMessage(
 		not_null<HistoryItem*> item,
-		TextWithEntities quote = {},
-		int quoteOffset = 0);
+		FullReplyTo fields = {});
 	void editMessage(
 		not_null<HistoryItem*> item,
 		const TextSelection &selection);
@@ -216,7 +225,7 @@ public:
 		not_null<PeerData*> peer);
 
 	[[nodiscard]] FullReplyTo replyTo() const;
-	[[nodiscard]] SuggestPostOptions suggestOptions(
+	[[nodiscard]] SuggestOptions suggestOptions(
 		bool skipNoAdminCheck = false) const;
 	bool lastForceReplyReplied(const FullMsgId &replyTo) const;
 	bool lastForceReplyReplied() const;
@@ -235,6 +244,7 @@ public:
 	void sendBotCommand(const Bot::SendCommandRequest &request);
 	void hideSingleUseKeyboard(FullMsgId replyToId);
 	bool insertBotCommand(const QString &cmd);
+	void insertTextAtCursor(const QString &text);
 
 	bool eventFilter(QObject *obj, QEvent *e) override;
 
@@ -286,7 +296,8 @@ public:
 	void messageShotSelected();
 	void clearSelected();
 
-	[[nodiscard]] SendMenu::Details sendMenuDetails() const;
+	[[nodiscard]] SendMenu::Details sendMenuDetails() const override;
+	bool processChosenSticker(ChatHelpers::FileChosen &&chosen) override;
 	[[nodiscard]] SendMenu::Details saveMenuDetails() const;
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
@@ -386,7 +397,6 @@ private:
 	void setTabbedPanel(std::unique_ptr<TabbedPanel> panel);
 	void updateField();
 	void fieldChanged();
-	void fieldTabbed();
 	void fieldFocused();
 	void fieldResized();
 
@@ -400,6 +410,9 @@ private:
 	void windowIsVisibleChanged();
 	void saveFieldToHistoryLocalDraft();
 	void fileChosen(ChatHelpers::FileChosen &&data);
+	void setupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<void(SendMenu::Action, SendMenu::Details)> action);
 
 	void updateFieldSubmitSettings();
 	bool clearMaybeSendStart();
@@ -421,8 +434,17 @@ private:
 	void messageDataReceived(not_null<PeerData*> peer, MsgId msgId);
 
 	[[nodiscard]] Api::SendAction prepareSendAction(
-		Api::SendOptions options) const;
+		Api::SendOptions options);
+	void sendTextWithTags(
+		TextWithTags textWithTags,
+		bool useWebPageDraft,
+		Api::SendOptions options,
+		Fn<void()> done);
 	void sendVoice(const VoiceToSend &data);
+	void sendWithTextOverride(
+		TextWithEntities text,
+		Api::SendOptions options,
+		Fn<void()> done);
 	void send(Api::SendOptions options);
 	void sendWithModifiers(Qt::KeyboardModifiers modifiers);
 	void sendScheduled(Api::SendOptions initialOptions);
@@ -460,7 +482,7 @@ private:
 	void supportInsertText(const QString &text);
 	void supportShareContact(Support::Contact contact);
 
-	auto computeSendButtonType() const;
+	[[nodiscard]] auto computeSendButtonType() const;
 
 	void showFinished();
 	void updateOverStates(QPoint pos);
@@ -486,21 +508,14 @@ private:
 		Ui::PreparedList &&list,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Ui::PreparedList &list) const;
-	bool showSendingFilesError(
-		const Ui::PreparedList &list,
-		std::optional<bool> compress) const;
+	bool showSendingFilesError(const Ui::PreparedBundle &bundle) const;
+
 	bool showSendMessageError(
 		const TextWithTags &textWithTags,
 		bool ignoreSlowmodeCountdown,
 		Fn<void(int starsApproved)> withPaymentApproved = nullptr,
 		Api::SendOptions options = {});
 
-	void sendingFilesConfirmed(
-		Ui::PreparedList &&list,
-		Ui::SendFilesWay way,
-		TextWithTags &&caption,
-		Api::SendOptions options,
-		bool ctrlShiftEnter);
 	void sendingFilesConfirmed(
 		std::shared_ptr<Ui::PreparedBundle> bundle,
 		Api::SendOptions options);
@@ -516,10 +531,25 @@ private:
 	// like send button, emoji button and others.
 	void moveFieldControls();
 	void updateFieldSize();
+	void initAiButton();
+	void updateAiButtonVisibility();
+	void updateAiButtonGeometry();
+	void showAiComposeBox();
+	void initSendAsFileButton();
+	void sendTextAsFile(
+		const QString &fileText,
+		TextWithTags restoreText,
+		int restorePosition,
+		int restoreAnchor);
+	void updateSendAsFileVisibility();
+	void updateSendAsFileGeometry();
+	[[nodiscard]] bool canSendAiComposeDirect() const;
 
 	[[nodiscard]] MsgId resolveReplyToTopicRootId();
 	[[nodiscard]] Data::ForumTopic *resolveReplyToTopic();
 	[[nodiscard]] bool canWriteMessage() const;
+	[[nodiscard]] bool hasEnoughLinesForAi() const;
+	[[nodiscard]] bool textExceedsMaxSize() const;
 	void orderWidgets();
 
 	[[nodiscard]] InlineBotQuery parseInlineBotQuery() const;
@@ -689,7 +719,7 @@ private:
 	void refreshSendGiftToggle();
 	void refreshSuggestPostToggle();
 	void applySuggestOptions(
-		SuggestPostOptions suggest,
+		SuggestOptions suggest,
 		HistoryView::SuggestMode mode);
 	void setupSendAsToggle();
 	void refreshSendAsToggle();
@@ -724,7 +754,7 @@ private:
 	std::unique_ptr<Ui::SpoilerAnimation> _replySpoiler;
 	mutable base::Timer _updateEditTimeLeftDisplay;
 
-	std::unique_ptr<HistoryView::SuggestOptions> _suggestOptions;
+	std::unique_ptr<HistoryView::SuggestOptionsBar> _suggestOptions;
 
 	object_ptr<Ui::IconButton> _fieldBarCancel;
 
@@ -784,6 +814,7 @@ private:
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
 	History *_history = nullptr;
+	mutable Data::ForumTopic *_creatingBotTopic = nullptr;
 	rpl::lifetime _historySponsoredPreloading;
 
 	// Initial updateHistoryGeometry() was called.
@@ -818,6 +849,8 @@ private:
 	std::unique_ptr<HistoryView::BusinessBotStatus> _businessBotStatus;
 
 	const std::shared_ptr<Ui::SendButton> _send;
+	HistoryView::Controls::ComposeAiButton * const _aiButton = nullptr;
+	Ui::IconButton * const _sendAsFile = nullptr;
 	object_ptr<Ui::FlatButton> _unblock;
 	object_ptr<Ui::FlatButton> _botStart;
 	object_ptr<Ui::FlatButton> _joinChannel;
@@ -851,6 +884,10 @@ private:
 	std::unique_ptr<HistoryView::SubsectionTabs> _subsectionTabs;
 	rpl::lifetime _subsectionTabsLifetime;
 	rpl::lifetime _subsectionCheckLifetime;
+	rpl::lifetime _subsectionTopicsLifetime;
+	std::unique_ptr<HistoryView::Controls::AiTooltipManager> _aiTooltipManager;
+	std::unique_ptr<HistoryView::Controls::AiTooltipManager> _sendAsFileTooltipManager;
+	std::shared_ptr<Ui::ChatStyle> _fieldChatStyle;
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;
 	base::unique_qptr<Ui::RpWidget> _fieldDisabled;
@@ -899,6 +936,7 @@ private:
 
 	HistoryView::InfoTooltip _topToast;
 	std::unique_ptr<HistoryView::StickerToast> _stickerToast;
+	std::unique_ptr<HistoryView::SelfForwardsTagger> _selfForwardsTagger;
 	std::unique_ptr<ChooseMessagesForReport> _chooseForReport;
 
 	std::unique_ptr<HistoryView::PaidReactionToast> _paidReactionToast;

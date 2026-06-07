@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_location_manager.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
+#include "history/view/media/history_view_birthday_suggestion.h"
 #include "history/view/media/history_view_photo.h"
 #include "history/view/media/history_view_sticker.h"
 #include "history/view/media/history_view_gif.h"
@@ -39,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_unique_gift.h"
 #include "history/view/media/history_view_userpic_suggestion.h"
 #include "dialogs/ui/dialogs_message_view.h"
+#include "ui/boxes/emoji_stake_box.h"
+#include "ui/controls/ton_common.h"
 #include "ui/image/image.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/text/format_song_document_name.h"
@@ -54,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "chat_helpers/stickers_dice_pack.h" // Stickers::DicePacks::IsSlot.
 #include "chat_helpers/stickers_gift_box_pack.h"
+#include "data/components/credits.h"
 #include "data/data_session.h"
 #include "data/data_auto_download.h"
 #include "data/data_photo.h"
@@ -99,11 +103,11 @@ struct AlbumCounts {
 };
 
 [[nodiscard]] TextWithEntities WithCaptionNotificationText(
-		const QString &attachType,
+		TextWithEntities attachType,
 		const TextWithEntities &caption,
 		bool hasMiniImages = false) {
 	if (caption.text.isEmpty()) {
-		return Ui::Text::Colorized(attachType);
+		return Ui::Text::Colorized(std::move(attachType));
 	}
 	auto wrapped = st::wrap_rtl(caption);
 	return hasMiniImages
@@ -114,11 +118,21 @@ struct AlbumCounts {
 			tr::lng_dialogs_text_media_wrapped(
 				tr::now,
 				lt_media,
-				Ui::Text::Colorized(attachType),
-				Ui::Text::WithEntities),
+				Ui::Text::Colorized(std::move(attachType)),
+				tr::marked),
 			lt_caption,
 			wrapped,
-			Ui::Text::WithEntities);
+			tr::marked);
+}
+
+[[nodiscard]] TextWithEntities WithCaptionNotificationText(
+		const QString &attachType,
+		const TextWithEntities &caption,
+		bool hasMiniImages = false) {
+	return WithCaptionNotificationText(
+		Ui::Text::WithEntities(attachType),
+		caption,
+		hasMiniImages);
 }
 
 [[nodiscard]] QImage PreparePreviewImage(
@@ -225,8 +239,8 @@ template <typename MediaType>
 	Expects(media->owner()->hasThumbnail());
 
 	const auto document = media->owner();
-	const auto readyCacheKey = CountCacheKey(document, radius, spoiler);
 	if (const auto thumbnail = media->thumbnail()) {
+		const auto readyCacheKey = CountCacheKey(document, radius, spoiler);
 		return {
 			PreparePreviewImage(thumbnail, radius, spoiler),
 			readyCacheKey,
@@ -259,7 +273,8 @@ template <typename MediaType>
 		bool spoiler) {
 	auto result = PreparePhotoPreviewImage(item, media, radius, spoiler);
 	if (!result.data.isNull()
-		&& media->owner()->extendedMediaVideoDuration().has_value()) {
+		&& (media->owner()->extendedMediaVideoDuration().has_value()
+			|| (item->media() && item->media()->videoCover()))) {
 		result.data = PutPlayIcon(std::move(result.data));
 	}
 	return result;
@@ -668,6 +683,10 @@ bool Media::storyExpired(bool revalidate) {
 	return false;
 }
 
+bool Media::storyUnsupported() const {
+	return false;
+}
+
 bool Media::storyMention() const {
 	return false;
 }
@@ -678,6 +697,10 @@ const GiveawayStart *Media::giveawayStart() const {
 
 const GiveawayResults *Media::giveawayResults() const {
 	return nullptr;
+}
+
+DiceGameOutcome Media::diceGameOutcome() const {
+	return {};
 }
 
 bool Media::uploading() const {
@@ -1010,7 +1033,7 @@ std::unique_ptr<HistoryView::Media> MediaPhoto::createView(
 					message,
 					_chat,
 					_photo,
-					st::msgServicePhotoWidth));
+					st::msgServiceUserpicSuggestionPhotoWidth));
 		}
 		return std::make_unique<HistoryView::Photo>(
 			message,
@@ -1157,7 +1180,28 @@ ItemPreview MediaFile::toPreview(ToPreviewOptions options) const {
 	const auto radius = _document->isVideoMessage()
 		? ImageRoundRadius::Ellipse
 		: ImageRoundRadius::Small;
-	if (auto found = FindCachedPreview(
+	if (_videoCover) {
+		if (auto found = FindCachedPreview(
+				existing,
+				not_null{ _videoCover },
+				radius,
+				spoilered)) {
+			images.push_back(std::move(found));
+		} else {
+			const auto media = _videoCover->createMediaView();
+			if (auto prepared = PreparePhotoPreview(
+					parent(),
+					media,
+					radius,
+					_spoiler)
+				; prepared || !prepared.cacheKey) {
+				images.push_back(std::move(prepared));
+				if (!prepared.cacheKey) {
+					context = media;
+				}
+			}
+		}
+	} else if (auto found = FindCachedPreview(
 			existing,
 			_document,
 			radius,
@@ -1177,27 +1221,35 @@ ItemPreview MediaFile::toPreview(ToPreviewOptions options) const {
 			}
 		}
 	}
-	const auto type = [&] {
+	const auto type = [&]() -> TextWithEntities {
 		using namespace Ui::Text;
 		if (_document->isVideoMessage()) {
-			return (item->media() && item->media()->ttlSeconds())
+			return WithEntities((item->media() && item->media()->ttlSeconds())
 				? tr::lng_in_dlg_video_message_ttl(tr::now)
-				: tr::lng_in_dlg_video_message(tr::now);
+				: tr::lng_in_dlg_video_message(tr::now));
 		} else if (_document->isAnimation()) {
-			return u"GIF"_q;
+			return WithEntities(u"GIF"_q);
 		} else if (_document->isVideoFile()) {
-			return tr::lng_in_dlg_video(tr::now);
+			return WithEntities(tr::lng_in_dlg_video(tr::now));
 		} else if (_document->isVoiceMessage()) {
-			return (item->media() && item->media()->ttlSeconds())
-				? tr::lng_in_dlg_voice_message_ttl(tr::now)
-				: tr::lng_in_dlg_audio(tr::now);
+			if (item->media() && item->media()->ttlSeconds()) {
+				return WithEntities(
+					tr::lng_in_dlg_voice_message_ttl(tr::now));
+			} else if (item->isUnreadMedia()) {
+				return tr::lng_in_dlg_audio_unread(
+					tr::now,
+					lt_emoji,
+					IconEmoji(&st::dialogsUnreadMediaDotEmoji),
+					tr::rich);
+			}
+			return WithEntities(tr::lng_in_dlg_audio(tr::now));
 		} else if (const auto name = FormatSongNameFor(_document).string();
 				!name.isEmpty()) {
-			return name;
+			return WithEntities(name);
 		} else if (_document->isAudioFile()) {
-			return tr::lng_in_dlg_audio_file(tr::now);
+			return WithEntities(tr::lng_in_dlg_audio_file(tr::now));
 		}
-		return tr::lng_in_dlg_file(tr::now);
+		return WithEntities(tr::lng_in_dlg_file(tr::now));
 	}();
 	const auto caption = (options.hideCaption || options.ignoreMessageText)
 		? TextWithEntities()
@@ -1310,7 +1362,7 @@ bool MediaFile::forwardedBecomesUnread() const {
 }
 
 bool MediaFile::dropForwardedInfo() const {
-	return _document->isSong();
+	return false;
 }
 
 bool MediaFile::hasSpoiler() const {
@@ -1322,7 +1374,7 @@ crl::time MediaFile::ttlSeconds() const {
 }
 
 bool MediaFile::allowsForward() const {
-	return !ttlSeconds();
+	return true;
 }
 
 bool MediaFile::updateInlineResultMedia(const MTPMessageMedia &media) {
@@ -1970,6 +2022,10 @@ std::unique_ptr<HistoryView::Media> MediaWebPage::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
+	if (realParent->hideLinks()) {
+		realParent->setHasHiddenLinks(true);
+		return nullptr;
+	}
 	return std::make_unique<HistoryView::WebPage>(message, _page, _flags);
 }
 
@@ -2210,8 +2266,7 @@ ItemPreview MediaInvoice::toPreview(ToPreviewOptions options) const {
 			? parent()->translatedText()
 			: parent()->originalText());
 	const auto hasMiniImages = !images.empty();
-	auto nice = Ui::Text::Colorized(
-		Ui::CreditsEmojiSmall(&parent()->history()->session()));
+	auto nice = Ui::Text::Colorized(Ui::CreditsEmojiSmall());
 	nice.append(WithCaptionNotificationText(type, caption, hasMiniImages));
 	return {
 		.text = std::move(nice),
@@ -2274,11 +2329,30 @@ MediaPoll::~MediaPoll() {
 }
 
 std::unique_ptr<Media> MediaPoll::clone(not_null<HistoryItem*> parent) {
-	return std::make_unique<MediaPoll>(parent, _poll);
+	auto result = std::make_unique<MediaPoll>(parent, _poll);
+	result->_consumedText = _consumedText;
+	return result;
 }
 
 PollData *MediaPoll::poll() const {
 	return _poll;
+}
+
+Storage::SharedMediaTypesMask MediaPoll::sharedMediaTypes() const {
+	return Storage::SharedMediaTypesMask{}
+		.added(Storage::SharedMediaType::Poll);
+}
+
+ItemPreview MediaPoll::toPreview(ToPreviewOptions options) const {
+	const auto caption = (options.hideCaption || options.ignoreMessageText)
+		? TextWithEntities()
+		: Dialogs::Ui::DialogsPreviewText(options.translated
+			? parent()->translatedText()
+			: parent()->originalText());
+	const auto type = u"\xD83D\xDCCA "_q + _poll->question.text;
+	return {
+		.text = WithCaptionNotificationText(type, caption),
+	};
 }
 
 TextWithEntities MediaPoll::notificationText() const {
@@ -2295,6 +2369,9 @@ QString MediaPoll::pinnedTextSubstring() const {
 
 TextForMimeData MediaPoll::clipboardText() const {
 	auto result = TextWithEntities();
+	if (!_consumedText.text.isEmpty()) {
+		result.append(_consumedText).append(u"\n"_q);
+	}
 	result
 		.append(u"[ "_q)
 		.append(tr::lng_in_dlg_poll(tr::now))
@@ -2307,19 +2384,33 @@ TextForMimeData MediaPoll::clipboardText() const {
 	return TextForMimeData::Rich(std::move(result));
 }
 
+bool MediaPoll::consumeMessageText(const TextWithEntities &text) {
+	_consumedText = text;
+	return true;
+}
+
+TextWithEntities MediaPoll::consumedMessageText() const {
+	return _consumedText;
+}
+
 bool MediaPoll::updateInlineResultMedia(const MTPMessageMedia &media) {
 	return false;
 }
 
 bool MediaPoll::updateSentMedia(const MTPMessageMedia &media) {
-	return false;
+	return media.match([&](const MTPDmessageMediaPoll &data) {
+		parent()->history()->owner().processPoll(data);
+		return true;
+	}, [](const auto &) {
+		return false;
+	});
 }
 
 std::unique_ptr<HistoryView::Media> MediaPoll::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
-	return std::make_unique<HistoryView::Poll>(message, _poll);
+	return std::make_unique<HistoryView::Poll>(message, _poll, _consumedText);
 }
 
 MediaTodoList::MediaTodoList(
@@ -2345,7 +2436,7 @@ TodoListData *MediaTodoList::todolist() const {
 
 TextWithEntities MediaTodoList::notificationText() const {
 	return TextWithEntities()
-		.append(QChar(0x2611))
+		.append(QChar(0x2705))
 		.append(QChar(' '))
 		.append(Ui::Text::Colorized(_todolist->title));
 }
@@ -2369,7 +2460,7 @@ TextForMimeData MediaTodoList::clipboardText() const {
 }
 
 bool MediaTodoList::allowsEdit() const {
-	return parent()->out();
+	return parent()->out() || parent()->history()->peer->isSelf();
 }
 
 bool MediaTodoList::updateInlineResultMedia(const MTPMessageMedia &media) {
@@ -2390,14 +2481,20 @@ std::unique_ptr<HistoryView::Media> MediaTodoList::createView(
 		replacing);
 }
 
-MediaDice::MediaDice(not_null<HistoryItem*> parent, QString emoji, int value)
+MediaDice::MediaDice(
+	not_null<HistoryItem*> parent,
+	DiceGameOutcome outcome,
+	QString emoji,
+	int value)
 : Media(parent)
+, _outcome(outcome)
 , _emoji(emoji)
 , _value(value) {
+	parent->history()->session().credits().tonLoad();
 }
 
 std::unique_ptr<Media> MediaDice::clone(not_null<HistoryItem*> parent) {
-	return std::make_unique<MediaDice>(parent, _emoji, _value);
+	return std::make_unique<MediaDice>(parent, _outcome, _emoji, _value);
 }
 
 QString MediaDice::emoji() const {
@@ -2406,6 +2503,10 @@ QString MediaDice::emoji() const {
 
 int MediaDice::value() const {
 	return _value;
+}
+
+DiceGameOutcome MediaDice::diceGameOutcome() const {
+	return _outcome;
 }
 
 bool MediaDice::allowsRevoke(TimeId now) const {
@@ -2440,8 +2541,22 @@ bool MediaDice::updateSentMedia(const MTPMessageMedia &media) {
 	if (media.type() != mtpc_messageMediaDice) {
 		return false;
 	}
-	_value = media.c_messageMediaDice().vvalue().v;
-	parent()->history()->owner().requestItemRepaint(parent());
+	const auto &data = media.c_messageMediaDice();
+	_value = data.vvalue().v;
+	if (const auto outcome = data.vgame_outcome()) {
+		const auto &data = outcome->data();
+		_outcome = Data::DiceGameOutcome{
+			.nanoTon = int64(data.vton_amount().v),
+			.stakeNanoTon = int64(data.vstake_ton_amount().v),
+			.seed = data.vseed().v,
+		};
+	} else {
+		_outcome = {};
+	}
+	if (parent()->out() && _outcome.stakeNanoTon > 0) {
+		parent()->history()->session().credits().tonLoad(true);
+	}
+	parent()->history()->owner().notifyItemDataChange(parent());
 	return true;
 }
 
@@ -2474,39 +2589,100 @@ ClickHandlerPtr MediaDice::MakeHandler(
 		}
 	};
 	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
-		auto config = Ui::Toast::Config{
-			.text = { tr::lng_about_random(tr::now, lt_emoji, emoji) },
-			.st = &st::historyDiceToast,
-			.duration = Ui::Toast::kDefaultDuration * 2,
-		};
-		if (CanSend(history->peer, ChatRestriction::SendOther)) {
-			auto link = Ui::Text::Link(tr::lng_about_random_send(tr::now));
-			link.entities.push_back(
-				EntityInText(EntityType::Semibold, 0, link.text.size()));
-			config.text.append(' ').append(std::move(link));
-			config.filter = crl::guard(&history->session(), [=](
-					const ClickHandlerPtr &handler,
-					Qt::MouseButton button) {
-				if (button == Qt::LeftButton && !ShownToast.empty()) {
-					auto message = Api::MessageToSend(
-						Api::SendAction(history));
-					message.action.clearDraft = false;
-					message.textWithTags.text = emoji;
-
-					Api::SendDice(message);
-					HideExisting();
-				}
-				return false;
-			});
-		}
-
-		HideExisting();
+		const auto found = Ui::Emoji::Find(emoji);
+		const auto id = found ? found->id() : QString();
+		const auto game = (id == QString::fromUtf8("\xf0\x9f\x8e\xb2"));
 		const auto my = context.other.value<ClickHandlerContext>();
 		const auto weak = my.sessionWindow;
-		if (const auto strong = weak.get()) {
-			ShownToast = strong->showToast(std::move(config));
+		const auto sendWith = [=](const QByteArray &hash, int64 nanoTon) {
+			auto message = Api::MessageToSend(
+				Api::SendAction(history));
+			message.textWithTags.text = emoji;
+
+			auto &action = message.action;
+			action.clearDraft = false;
+
+			auto &options = action.options;
+			options.stakeNanoTon = nanoTon;
+			options.stakeSeedHash = hash;
+
+			Api::SendDice(message);
+
+			HideExisting();
+		};
+		const auto sendAllowed = CanSend(
+			history->peer,
+			ChatRestriction::SendOther);
+		const auto showToast = [=](Ui::Toast::Config &&config) {
+			HideExisting();
+			if (const auto strong = weak.get()) {
+				ShownToast = strong->showToast(std::move(config));
+			} else {
+				ShownToast = Ui::Toast::Show(std::move(config));
+			}
+		};
+		const auto showSimple = [=] {
+			auto config = Ui::Toast::Config{
+				.text = { tr::lng_about_random(tr::now, lt_emoji, emoji) },
+				.st = &st::historyDiceToast,
+				.duration = Ui::Toast::kDefaultDuration * 2,
+			};
+			if (sendAllowed) {
+				auto link = tr::link(tr::lng_about_random_send(tr::now));
+				link.entities.push_back(
+					EntityInText(EntityType::Semibold, 0, link.text.size()));
+				config.text.append(' ').append(std::move(link));
+				config.filter = crl::guard(&history->session(), [=](
+						const ClickHandlerPtr &handler,
+						Qt::MouseButton button) {
+					if (button == Qt::LeftButton && !ShownToast.empty()) {
+						sendWith(QByteArray(), 0);
+					}
+					return false;
+				});
+			}
+			showToast(std::move(config));
+		};
+		if (!game || !sendAllowed) {
+			showSimple();
 		} else {
-			ShownToast = Ui::Toast::Show(std::move(config));
+			const auto pack = &history->session().diceStickersPacks();
+			pack->resolveGameOptions([=](
+					const Data::DiceGameOptions &options) {
+				const auto window = weak.get();
+				const auto seedHash = options.seedHash;
+				const auto sendWithStake = [=](int64 stakeNanoTon) {
+					if (stakeNanoTon > 0 && window) {
+						const auto session = &window->session();
+						const auto credits = &session->credits();
+						const auto required = CreditsAmount(
+							stakeNanoTon / Ui::kNanosInOne,
+							stakeNanoTon % Ui::kNanosInOne,
+							CreditsType::Ton);
+						if (credits->tonLoaded()
+							&& credits->tonBalance() < required) {
+							HideExisting();
+							window->uiShow()->show(Box(
+								Ui::InsufficientTonBox,
+								session,
+								required));
+							return;
+						}
+					}
+					sendWith(seedHash, stakeNanoTon);
+				};
+				if (!options || !window) {
+					showSimple();
+				} else {
+					showToast(Ui::MakeEmojiGameStakeToast(window->uiShow(), {
+						.session = &window->session(),
+						.currentStake = options.previousSteakNanoTon,
+						.milliRewards = options.milliRewards,
+						.jackpotMilliReward = options.jackpotMilliReward,
+						.submit = sendWithStake,
+					}));
+				}
+			});
 		}
 	});
 }
@@ -2564,15 +2740,32 @@ std::unique_ptr<HistoryView::Media> MediaGiftBox::createView(
 		not_null<HistoryView::Element*> message,
 		not_null<HistoryItem*> realParent,
 		HistoryView::Element *replacing) {
-	if (const auto &unique = _data.unique) {
+	if (_data.type == GiftType::BirthdaySuggest) {
+		return std::make_unique<HistoryView::MediaGeneric>(
+			message,
+			HistoryView::GenerateSuggetsBirthdayMedia(
+				message,
+				replacing,
+				Data::Birthday::FromSerialized(_data.count)),
+			HistoryView::MediaGenericDescriptor{
+				.maxWidth = st::birthdaySuggestStickerWidth,
+				.service = true,
+				.hideServiceText = true,
+			});
+	} else if (_data.type == GiftType::ChatTheme
+		|| _data.type == GiftType::GiftOffer) {
+		return std::make_unique<HistoryView::ServiceBox>(
+			message,
+			std::make_unique<HistoryView::GiftServiceBox>(message, this));
+	} else if (const auto &unique = _data.unique) {
 		return std::make_unique<HistoryView::MediaGeneric>(
 			message,
 			HistoryView::GenerateUniqueGiftMedia(message, replacing, unique),
 			HistoryView::MediaGenericDescriptor{
-				.maxWidth = (_data.stargiftReleasedBy
-					? st::msgServiceStarGiftByWidth
-					: st::msgServiceGiftBoxSize.width()),
-				.paintBg = HistoryView::UniqueGiftBg(message, unique),
+				.maxWidth = st::msgServiceGiftBoxSize.width(),
+				.paintBgFactory = [=] {
+					return HistoryView::UniqueGiftBg(message, unique);
+				},
 				.service = true,
 			});
 	}
@@ -2649,7 +2842,9 @@ MediaStory::MediaStory(
 	if (!maybeStory && maybeStory.error() == NoStory::Unknown) {
 		stories->resolve(storyId, crl::guard(this, [=] {
 			if (const auto maybeStory = stories->lookup(storyId)) {
-				if (!_mention && _viewMayExist) {
+				if ((*maybeStory)->unsupported() || (*maybeStory)->call()) {
+					_unsupported = true;
+				} else if (!_mention && _viewMayExist) {
 					parent->setText((*maybeStory)->caption());
 				}
 			} else {
@@ -2682,12 +2877,19 @@ bool MediaStory::storyExpired(bool revalidate) {
 	if (revalidate) {
 		const auto stories = &parent()->history()->owner().stories();
 		if (const auto maybeStory = stories->lookup(_storyId)) {
+			if ((*maybeStory)->unsupported() || (*maybeStory)->call()) {
+				_unsupported = true;
+			}
 			_expired = false;
 		} else if (maybeStory.error() == Data::NoStory::Deleted) {
 			_expired = true;
 		}
 	}
 	return _expired;
+}
+
+bool MediaStory::storyUnsupported() const {
+	return _unsupported;
 }
 
 bool MediaStory::storyMention() const {
@@ -2766,7 +2968,10 @@ std::unique_ptr<HistoryView::Media> MediaStory::createView(
 	_expired = false;
 	_viewMayExist = true;
 	const auto story = *maybeStory;
-	if (_mention) {
+	if (story->unsupported() || story->call()) {
+		_unsupported = true;
+		return nullptr;
+	} else if (_mention) {
 		return std::make_unique<HistoryView::ServiceBox>(
 			message,
 			std::make_unique<HistoryView::StoryMention>(message, story));
@@ -2778,13 +2983,14 @@ std::unique_ptr<HistoryView::Media> MediaStory::createView(
 				realParent,
 				photo,
 				spoiler);
-		} else {
+		} else if (const auto document = story->document()) {
 			return std::make_unique<HistoryView::Gif>(
 				message,
 				realParent,
-				story->document(),
+				document,
 				spoiler);
 		}
+		return nullptr;
 	}
 }
 

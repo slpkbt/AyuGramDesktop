@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" x1="245" y1="690" x2="815" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#271b48"/>
+      <stop offset="0.58" stop-color="#4b368a"/>
+      <stop offset="1" stop-color="#6f58c8"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="415" y1="742" x2="713" y2="386" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7a5be8"/>
+      <stop offset="1" stop-color="#d6c5ff"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="350" y1="690" x2="505" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f4f0ff"/>
+      <stop offset="1" stop-color="#6f52c8"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#body)" d="M188 384c-38-44-3-108 56-108 184 0 333-34 548-117 60-23 113 32 91 92L719 795c-19 64-96 87-146 42L188 384Z"/>
+  <path fill="#fbfaff" d="M327 566c18-32 56-54 89-77l380-260c11-8 24 6 15 17L423 703c-51 62-100 60-96-20l0-117Z"/>
+  <path fill="url(#wing)" d="M423 703 811 246 641 716c-14 39-58 52-91 28L423 703Z"/>
+  <path fill="url(#fold)" d="M327 683c0 61 58 76 96 20l49-59-83-38-62 77Z"/>
+  <path fill="#f9f7ff" d="m326 338 22 60 60 22-60 22-22 60-22-60-60-22 60-22 22-60Z"/>
+  <path fill="#c9b8ff" d="m437 336 12 33 33 12-33 12-12 33-12-33-33-12 33-12 12-33Z"/>
+  <path fill="#c9b8ff" d="m416 458 12 32 32 12-32 12-12 32-12-32-32-12 32-12 12-32Z"/>
+</svg>

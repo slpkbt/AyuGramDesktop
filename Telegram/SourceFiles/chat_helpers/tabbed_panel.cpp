@@ -12,7 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "window/window_session_controller.h"
-#include "mainwindow.h"
+#include "main/main_session.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
 #include "ayu/ayu_settings.h"
 #include "core/application.h"
 #include "base/options.h"
@@ -28,7 +30,6 @@ base::options::toggle TabbedPanelShowOnClick({
 	.id = kOptionTabbedPanelShowOnClick,
 	.name = "Show tabbed panel by click",
 	.description = "Show Emoji / Stickers / GIFs panel only after a click.",
-	.scope = static_cast<base::options::details::ScopeFlag>(0),
 });
 
 } // namespace
@@ -36,7 +37,7 @@ base::options::toggle TabbedPanelShowOnClick({
 const char kOptionTabbedPanelShowOnClick[] = "tabbed-panel-show-on-click";
 
 bool ShowPanelOnClick() {
-	return TabbedPanelShowOnClick.value();
+	return !AyuSettings::getInstance().showEmojiPopup();
 }
 
 TabbedPanel::TabbedPanel(
@@ -70,7 +71,8 @@ TabbedPanel::TabbedPanel(
 	: _ownedSelector.data())
 , _heightRatio(st::emojiPanHeightRatio)
 , _minContentHeight(st::emojiPanMinHeight)
-, _maxContentHeight(st::emojiPanMaxHeight) {
+, _maxContentHeight(st::emojiPanMaxHeight)
+, _shadow(_selector->st().showAnimation.shadow) {
 	Expects(_selector != nullptr);
 
 	_selector->setParent(this);
@@ -88,7 +90,7 @@ TabbedPanel::TabbedPanel(
 		_pauseAnimations.fire(false);
 	});
 	_selector->showRequests(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		showFromSelector();
 	}, lifetime());
 
@@ -105,19 +107,26 @@ TabbedPanel::TabbedPanel(
 	_hideTimer.setCallback([this] { hideByTimerOrLeave(); });
 
 	_selector->checkForHide(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (!rect().contains(mapFromGlobal(QCursor::pos()))) {
 			_hideTimer.callOnce(kDelayedHideTimeoutMs);
 		}
 	}, lifetime());
 
 	_selector->cancelled(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		hideAnimated();
 	}, lifetime());
 
+	if (_regularWindow) {
+		_regularWindow->session().data().stickers().gifWithCaptionSent(
+		) | rpl::on_next([=] {
+			hideAnimated();
+		}, lifetime());
+	}
+
 	_selector->slideFinished(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		InvokeQueued(this, [=] {
 			if (_hideAfterSlide) {
 				startOpacityAnimation(true);
@@ -128,7 +137,7 @@ TabbedPanel::TabbedPanel(
 	macWindowDeactivateEvents(
 	) | rpl::filter([=] {
 		return !isHidden() && !preventAutoHide();
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		hideAnimated();
 	}, lifetime());
 
@@ -182,6 +191,10 @@ void TabbedPanel::setDesiredHeightValues(
 	_minContentHeight = minHeight;
 	_maxContentHeight = maxHeight;
 	updateContentHeight();
+}
+
+void TabbedPanel::setShowAnimationOrigin(Ui::PanelAnimation::Origin origin) {
+	_showAnimationOrigin = origin;
 }
 
 void TabbedPanel::setDropDown(bool dropDown) {
@@ -246,7 +259,7 @@ void TabbedPanel::paintEvent(QPaintEvent *e) {
 		hideFinished();
 	} else {
 		if (!_cache.isNull()) _cache = QPixmap();
-		Ui::Shadow::paint(p, innerRect(), width(), _selector->st().showAnimation.shadow);
+		_shadow.paint(p, innerRect(), st::emojiPanRadius);
 	}
 }
 
@@ -279,7 +292,7 @@ void TabbedPanel::leaveEventHook(QEvent *e) {
 	} else {
 		_hideTimer.callOnce(kHideTimeoutMs);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void TabbedPanel::otherEnter() {
@@ -372,17 +385,19 @@ void TabbedPanel::startShowAnimation() {
 	if (!_a_show.animating()) {
 		auto image = grabForAnimation();
 
+		const auto origin = _showAnimationOrigin.value_or(_dropDown
+			? Ui::PanelAnimation::Origin::TopRight
+			: Ui::PanelAnimation::Origin::BottomRight);
 		_showAnimation = std::make_unique<Ui::PanelAnimation>(
 			_selector->st().showAnimation,
-			(_dropDown
-				? Ui::PanelAnimation::Origin::TopRight
-				: Ui::PanelAnimation::Origin::BottomRight));
+			origin);
 		auto inner = rect().marginsRemoved(st::emojiPanMargins);
 		_showAnimation->setFinalImage(
 			std::move(image),
 			QRect(
 				inner.topLeft() * style::DevicePixelRatio(),
-				inner.size() * style::DevicePixelRatio()));
+				inner.size() * style::DevicePixelRatio()),
+			st::emojiPanRadius);
 		_showAnimation->setCornerMasks(Images::CornersMask(st::emojiPanRadius));
 		_showAnimation->start();
 	}
@@ -476,7 +491,7 @@ void TabbedPanel::showStarted() {
 bool TabbedPanel::eventFilter(QObject *obj, QEvent *e) {
 	const auto &settings = AyuSettings::getInstance();
 
-	if (TabbedPanelShowOnClick.value() || !settings.showEmojiPopup) {
+	if (!settings.showEmojiPopup()) {
 		return false;
 	} else if (e->type() == QEvent::Enter) {
 		otherEnter();

@@ -16,6 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 
+// AyuGram includes
+#include "ayu/utils/telegram_helpers.h"
+
+
 namespace HistoryView::Controls {
 
 WebPageText TitleAndDescriptionFromWebPage(not_null<WebPageData*> d) {
@@ -156,7 +160,7 @@ void WebpageResolver::request(const QString &link, bool force) {
 	_requestId = _api.request(
 		MTPmessages_GetWebPagePreview(
 			MTP_flags(0),
-			MTP_string(link),
+			MTP_string(getBetterLinkPreview(link)),
 			MTPVector<MTPMessageEntity>()
 	)).done([=](
 			const MTPmessages_WebPagePreview &result,
@@ -200,26 +204,26 @@ WebpageProcessor::WebpageProcessor(
 	_history->session().downloaderTaskFinished(
 	) | rpl::filter([=] {
 		return _data && (_data->document || _data->photo);
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		_repaintRequests.fire({});
 	}, _lifetime);
 
 	_history->owner().webPageUpdates(
 	) | rpl::filter([=](not_null<WebPageData*> page) {
 		return (_data == page.get());
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		_draft.id = _data->id;
 		_draft.url = _data->url;
 		updateFromData();
 	}, _lifetime);
 
 	_parser.list().changes(
-	) | rpl::start_with_next([=](QStringList &&parsed) {
+	) | rpl::on_next([=](QStringList &&parsed) {
 		_parsedLinks = std::move(parsed);
 		checkPreview();
 	}, _lifetime);
 
-	_resolver->resolved() | rpl::start_with_next([=](QString link) {
+	_resolver->resolved() | rpl::on_next([=](QString link) {
 		if (_link != link
 			|| _draft.removed
 			|| (_draft.manual && _draft.url != link)) {
@@ -229,6 +233,7 @@ WebpageProcessor::WebpageProcessor(
 		if (_data) {
 			_draft.id = _data->id;
 			_draft.url = _data->url;
+			_draft.previewChanged = (getBetterLinkPreview(link) != link);
 			updateFromData();
 		} else {
 			_links = QStringList();
@@ -392,6 +397,7 @@ void WebpageProcessor::checkPreview() {
 		_data = page;
 		_draft.id = _data->id;
 		_draft.url = _data->url;
+		_draft.previewChanged = (getBetterLinkPreview(chosen) != chosen);
 	} else {
 		_data = nullptr;
 		_draft = {};

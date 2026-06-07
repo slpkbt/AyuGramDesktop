@@ -97,6 +97,12 @@ bool SavedSublist::removeOne(not_null<HistoryItem*> item) {
 	const auto i = ranges::lower_bound(_list, id, std::greater<>());
 	changeUnreadCountByMessage(id, -1);
 	if (i == end(_list) || *i != id) {
+		if (const auto known = _fullCount.current()) {
+			if (*known > 0) {
+				_fullCount = (*known - 1);
+				return true;
+			}
+		}
 		return false;
 	}
 	_list.erase(i);
@@ -145,13 +151,13 @@ rpl::producer<MessagesSlice> SavedSublist::source(
 		history->session().changes().historyUpdates(
 			history,
 			HistoryUpdate::Flag::ClientSideMessages
-		) | rpl::start_with_next(pushDelayed, lifetime);
+		) | rpl::on_next(pushDelayed, lifetime);
 
 		_listChanges.events(
-		) | rpl::start_with_next(pushDelayed, lifetime);
+		) | rpl::on_next(pushDelayed, lifetime);
 
 		_instantChanges.events(
-		) | rpl::start_with_next(pushInstant, lifetime);
+		) | rpl::on_next(pushInstant, lifetime);
 
 		pushInstant();
 		return lifetime;
@@ -187,19 +193,36 @@ rpl::producer<> SavedSublist::destroyed() const {
 		) | rpl::to_empty);
 }
 
-void SavedSublist::applyMaybeLast(not_null<HistoryItem*> item, bool added) {
-	growLastKnownServerMessageId(item->id);
-	if (!_lastServerMessage || (*_lastServerMessage)->id < item->id) {
+void SavedSublist::applyMaybeLast(not_null<HistoryItem*> item) {
+	if (!item->isRegular() || item->isService()) {
+		return;
+	}
+	if (!_lastServerMessage.value_or(nullptr)
+		|| (*_lastServerMessage)->id < item->id) {
 		setLastServerMessage(item);
 		resolveChatListMessageGroup();
+	} else {
+		growLastKnownServerMessageId(item->id);
 	}
 }
 
 void SavedSublist::applyItemAdded(not_null<HistoryItem*> item) {
+	if (item->isService()) {
+		return;
+	}
+	const auto wasInChatList = shouldBeInChatList();
 	if (item->isRegular()) {
 		setLastServerMessage(item);
 	} else {
 		setLastMessage(item);
+	}
+	if (!_parent->parentChat() && !isPinnedDialog(FilterId())) {
+		if (_restorePinnedWhenNonEmpty) {
+			owner().setChatPinned(this, FilterId(), true);
+			_restorePinnedWhenNonEmpty = false;
+		} else if (!wasInChatList && shouldBeInChatList()) {
+			_parent->refreshPinned();
+		}
 	}
 }
 
@@ -217,7 +240,34 @@ void SavedSublist::applyItemRemoved(MsgId id) {
 	if (const auto chatListItem = _chatListMessage.value_or(nullptr)) {
 		if (chatListItem->id == id) {
 			_chatListMessage = std::nullopt;
-			requestChatListMessage();
+			crl::on_main(this, [=] {
+				const auto locallyKnownEmpty = _list.empty()
+					&& (_fullCount.current() == 0);
+				if (_chatListMessage.value_or(nullptr)) {
+					return;
+				} else if ((_skippedAfter == 0) || locallyKnownEmpty) {
+					if (!_list.empty()) {
+						applyMaybeLast(owner().message(
+							owningHistory()->peer,
+							_list.front()));
+						return;
+					} else if ((_skippedBefore == 0) || locallyKnownEmpty) {
+						if (!_parent->parentChat()
+							&& isPinnedDialog(FilterId())) {
+							_restorePinnedWhenNonEmpty = true;
+							owner().setChatPinned(this, FilterId(), false);
+						}
+						setLastServerMessage(nullptr);
+						updateChatListExistence();
+						return;
+					}
+				}
+				if (_parent->parentChat()) {
+					requestChatListMessage();
+				} else {
+					loadAround(0);
+				}
+			});
 		}
 	}
 }
@@ -226,6 +276,10 @@ void SavedSublist::requestChatListMessage() {
 	if (!chatListMessageKnown()) {
 		parent()->requestSublist(sublistPeer());
 	}
+}
+
+void SavedSublist::setRestorePinnedWhenNonEmpty(bool restore) {
+	_restorePinnedWhenNonEmpty = restore;
 }
 
 void SavedSublist::readTillEnd() {
@@ -255,7 +309,7 @@ bool SavedSublist::buildFromData(not_null<Viewer*> viewer) {
 	}
 	const auto i = around
 		? ranges::lower_bound(_list, around, std::greater<>())
-		: end(_list);
+		: (inMonoforum() ? end(_list) : begin(_list));
 	const auto availableBefore = int(end(_list) - i);
 	const auto availableAfter = int(i - begin(_list));
 	const auto useBefore = std::min(availableBefore, viewer->limitBefore + 1);
@@ -350,17 +404,19 @@ bool SavedSublist::processMessagesIsEmpty(
 			"(HistoryWidget::messagesReceived)"));
 		return 0;
 	}, [&](const MTPDmessages_messages &data) {
+		owningHistory()->peer->processTopics(data.vtopics());
 		return int(data.vmessages().v.size());
 	}, [&](const MTPDmessages_messagesSlice &data) {
+		owningHistory()->peer->processTopics(data.vtopics());
 		return data.vcount().v;
 	}, [&](const MTPDmessages_channelMessages &data) {
 		if (const auto channel = owningHistory()->peer->asChannel()) {
 			channel->ptsReceived(data.vpts().v);
-			channel->processTopics(data.vtopics());
 		} else {
 			LOG(("API Error: received messages.channelMessages when "
 				"no channel was passed! (HistoryWidget::messagesReceived)"));
 		}
+		owningHistory()->peer->processTopics(data.vtopics());
 		return data.vcount().v;
 	});
 
@@ -380,7 +436,8 @@ bool SavedSublist::processMessagesIsEmpty(
 	auto skipped = 0;
 	for (const auto &message : list) {
 		if (const auto item = owner().addNewMessage(message, localFlags, type)) {
-			if (item->sublistPeerId() == sublistPeer()->id) {
+			if (item->sublistPeerId() == sublistPeer()->id
+				&& item->isRegular()) {
 				if (toFront && item->id > _list.front()) {
 					refreshed.push_back(item->id);
 				} else if (_list.empty() || item->id < _list.back()) {
@@ -652,8 +709,8 @@ void SavedSublist::sendReadTillRequest() {
 
 	_sentReadTill = computeInboxReadTillFull();
 	_readRequestId = api->request(MTPmessages_ReadSavedHistory(
-		parentChat->input,
-		sublistPeer()->input,
+		parentChat->input(),
+		sublistPeer()->input(),
 		MTP_int(_sentReadTill.bare)
 	)).done(crl::guard(this, [=] {
 		_readRequestId = 0;
@@ -682,7 +739,7 @@ void SavedSublist::subscribeToUnreadChanges() {
 	) | rpl::combine_previous(
 	) | rpl::filter([=] {
 		return inChatList();
-	}) | rpl::start_with_next([=](
+	}) | rpl::on_next([=](
 			std::optional<int> previous,
 			std::optional<int> now) {
 		if (previous.value_or(0) != now.value_or(0)) {
@@ -846,14 +903,18 @@ int SavedSublist::fixedOnTopIndex() const {
 }
 
 bool SavedSublist::shouldBeInChatList() const {
-	if (const auto monoforum = _parent->parentChat()) {
-		if (monoforum == sublistPeer()) {
-			return false;
-		}
+	const auto monoforum = _parent->parentChat();
+	if (monoforum && (monoforum == sublistPeer())) {
+		return false;
+	}
+	const auto last = lastMessage();
+	const auto hasDisplayableLast = last && !last->isService();
+	if (!monoforum) {
+		return hasDisplayableLast;
 	}
 	return isPinnedDialog(FilterId())
 		|| !lastMessageKnown()
-		|| (lastMessage() != nullptr);
+		|| hasDisplayableLast;
 }
 
 HistoryItem *SavedSublist::lastMessage() const {
@@ -900,6 +961,7 @@ Dialogs::BadgesState SavedSublist::chatListBadgesState() const {
 		result.unreadMuted
 			= result.mentionMuted
 			= result.reactionMuted
+			= result.pollMuted
 			= true;
 	}
 	return result;
@@ -963,6 +1025,9 @@ void SavedSublist::hasUnreadReactionChanged(bool has) {
 		was.reactionsMuted = muted() ? was.reactions : 0;
 	}
 	notifyUnreadStateChange(was);
+}
+
+void SavedSublist::hasUnreadPollVoteChanged(bool has) {
 }
 
 void SavedSublist::allowChatListMessageResolve() {
@@ -1041,9 +1106,10 @@ void SavedSublist::setChatListMessage(HistoryItem *item) {
 		}
 		_chatListMessage = item;
 		setChatListTimeId(item->date());
+		updateChatListExistence();
 	} else if (!_chatListMessage || *_chatListMessage) {
 		_chatListMessage = nullptr;
-		updateChatListEntry();
+		updateChatListExistence();
 	}
 	_parent->listMessageChanged(was, item);
 }
@@ -1077,8 +1143,10 @@ Histories &SavedSublist::histories() {
 
 void SavedSublist::loadAround(MsgId id) {
 	if (_loadingAround && *_loadingAround == id) {
+		_loadingAroundRetry = id;
 		return;
 	}
+	_loadingAroundRetry = std::nullopt;
 	histories().cancelRequest(base::take(_beforeId));
 	histories().cancelRequest(base::take(_afterId));
 
@@ -1087,8 +1155,8 @@ void SavedSublist::loadAround(MsgId id) {
 		const auto parentChat = _parent->parentChat();
 		return session().api().request(MTPmessages_GetSavedHistory(
 			MTP_flags(parentChat ? Flag::f_parent_peer : Flag(0)),
-			parentChat ? parentChat->input : MTPInputPeer(),
-			sublistPeer()->input,
+			parentChat ? parentChat->input() : MTPInputPeer(),
+			sublistPeer()->input(),
 			MTP_int(id), // offset_id
 			MTP_int(0), // offset_date
 			MTP_int(id ? (-kMessagesPerPage / 2) : 0), // add_offset
@@ -1110,6 +1178,15 @@ void SavedSublist::loadAround(MsgId id) {
 			_list.clear();
 			if (processMessagesIsEmpty(result)) {
 				_fullCount = _skippedBefore = _skippedAfter = 0;
+				if (!_parent->parentChat()
+					&& !_chatListMessage.value_or(nullptr)) {
+					if (isPinnedDialog(FilterId())) {
+						_restorePinnedWhenNonEmpty = true;
+						owner().setChatPinned(this, FilterId(), false);
+					}
+					setLastServerMessage(nullptr);
+					updateChatListExistence();
+				}
 			} else if (id) {
 				Assert(!_list.empty());
 				if (_list.front() <= id) {
@@ -1117,8 +1194,17 @@ void SavedSublist::loadAround(MsgId id) {
 				} else if (_list.back() >= id) {
 					_skippedBefore = 0;
 				}
+			} else if (!_parent->parentChat()
+				&& !_chatListMessage.value_or(nullptr)) {
+				Assert(!_list.empty());
+				applyMaybeLast(owner().message(
+					owningHistory()->peer,
+					_list.front()));
 			}
 			checkReadTillEnd();
+			if (const auto retry = base::take(_loadingAroundRetry)) {
+				loadAround(*retry);
+			}
 		}).fail([=](const MTP::Error &error) {
 			if (error.type() == u"SAVED_DIALOGS_UNSUPPORTED"_q) {
 				_parent->markUnsupported();
@@ -1126,6 +1212,9 @@ void SavedSublist::loadAround(MsgId id) {
 			_beforeId = 0;
 			_loadingAround = std::nullopt;
 			finish();
+			if (const auto retry = base::take(_loadingAroundRetry)) {
+				loadAround(*retry);
+			}
 		}).send();
 	};
 	_loadingAround = id;
@@ -1150,8 +1239,8 @@ void SavedSublist::loadBefore() {
 		const auto parentChat = _parent->parentChat();
 		return session().api().request(MTPmessages_GetSavedHistory(
 			MTP_flags(parentChat ? Flag::f_parent_peer : Flag(0)),
-			parentChat ? parentChat->input : MTPInputPeer(),
-			sublistPeer()->input,
+			parentChat ? parentChat->input() : MTPInputPeer(),
+			sublistPeer()->input(),
 			MTP_int(last), // offset_id
 			MTP_int(0), // offset_date
 			MTP_int(0), // add_offset
@@ -1197,8 +1286,8 @@ void SavedSublist::loadAfter() {
 		const auto parentChat = _parent->parentChat();
 		return session().api().request(MTPmessages_GetSavedHistory(
 			MTP_flags(parentChat ? Flag::f_parent_peer : Flag(0)),
-			parentChat ? parentChat->input : MTPInputPeer(),
-			sublistPeer()->input,
+			parentChat ? parentChat->input() : MTPInputPeer(),
+			sublistPeer()->input(),
 			MTP_int(first + 1), // offset_id
 			MTP_int(0), // offset_date
 			MTP_int(-kMessagesPerPage), // add_offset

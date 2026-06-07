@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/filters/filters_controller.h"
 
 
 namespace HistoryView {
@@ -67,11 +68,8 @@ bool SendActionPainter::updateNeedsAnimating(
 		return false;
 	}
 
-	const auto &settings = AyuSettings::getInstance();
-	if (settings.hideFromBlocked) {
-		if (user->isBlocked()) {
-			return false;
-		}
+	if (FiltersController::isBlocked(user)) {
+		return false;
 	}
 
 	const auto now = crl::now();
@@ -142,6 +140,7 @@ bool SendActionPainter::updateNeedsAnimating(
 		Unexpected("EmojiInteraction here.");
 	}, [&](const MTPDsendMessageEmojiInteractionSeen &) {
 		// #TODO interaction
+	}, [&](const MTPDsendMessageTextDraftAction &) {
 	}, [&](const MTPDsendMessageCancelAction &) {
 		Unexpected("CancelAction here.");
 	});
@@ -397,14 +396,10 @@ bool SendActionPainter::updateNeedsAnimating(crl::time now, bool force) {
 	if (force
 		|| sendActionChanged
 		|| (sendActionResult && !anim::Disabled())) {
-		const auto height = std::max(
-			st::normalFont->height,
-			st::dialogsMiniPreviewTop + st::dialogsMiniPreview);
+		const auto width = _sendActionAnimation.width() + _animationLeft;
 		_history->peer->owner().sendActionManager().updateAnimation({
 			_topic ? ((Data::Thread*)_topic) : _history,
-			0,
-			_sendActionAnimation.width() + _animationLeft,
-			height,
+			{ 0, 0, width, st::normalFont->height },
 			(force || sendActionChanged)
 		});
 	}

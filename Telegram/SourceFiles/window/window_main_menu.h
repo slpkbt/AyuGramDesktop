@@ -93,6 +93,7 @@ private:
 	object_ptr<Ui::FlatLabel> _setEmojiStatus;
 	std::unique_ptr<Info::Profile::EmojiStatusPanel> _emojiStatusPanel;
 	std::unique_ptr<Info::Profile::Badge> _badge;
+	std::unique_ptr<Info::Profile::Badge> _exteraBadge;
 	object_ptr<ResetScaleButton> _resetScaleButton = { nullptr };
 	object_ptr<Ui::ScrollArea> _scroll;
 	not_null<Ui::VerticalLayout*> _inner;
@@ -104,8 +105,6 @@ private:
 	not_null<Ui::FlatLabel*> _telegram;
 	not_null<Ui::FlatLabel*> _version;
 	QPointer<Ui::SettingsButton> _nightThemeToggle;
-	QPointer<Ui::SettingsButton> _ghostModeToggle;
-	QPointer<Ui::SettingsButton> _streamerModeToggle;
 	rpl::event_stream<bool> _nightThemeSwitches;
 	base::Timer _nightThemeSwitch;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;

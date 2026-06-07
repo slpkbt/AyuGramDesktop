@@ -52,6 +52,7 @@ public:
 	[[nodiscard]] not_null<SavedSublist*> sublist(not_null<PeerData*> peer);
 	[[nodiscard]] SavedSublist *sublistLoaded(not_null<PeerData*> peer);
 	void requestSublist(not_null<PeerData*> peer, Fn<void()> done = nullptr);
+	void refreshPinned();
 
 	[[nodiscard]] rpl::producer<> chatsListChanges() const;
 	[[nodiscard]] rpl::producer<> chatsListLoadedEvents() const;
@@ -83,8 +84,6 @@ public:
 
 	void saveActiveSubsectionThread(not_null<Thread*> thread);
 	Thread *activeSubsectionThread() const;
-
-	[[nodiscard]] Dialogs::UnreadState unreadStateWithParentMuted() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime();
 
@@ -129,6 +128,7 @@ private:
 
 	mtpRequestId _loadMoreRequestId = 0;
 	mtpRequestId _pinnedRequestId = 0;
+	bool _refreshPinnedAfterRequest = false;
 
 	SavedMessagesOffsets _offset;
 

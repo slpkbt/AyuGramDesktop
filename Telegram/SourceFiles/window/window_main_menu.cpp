@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
+#include "settings/settings_common.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "info/profile/info_profile_icon.h"
 #include "info/stories/info_stories_widget.h"
@@ -36,9 +37,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
-#include "settings/settings_advanced.h"
-#include "settings/settings_calls.h"
-#include "settings/settings_information.h"
+#include "settings/sections/settings_advanced.h"
+#include "settings/sections/settings_calls.h"
+#include "settings/sections/settings_information.h"
 #include "storage/localstorage.h"
 #include "storage/storage_account.h"
 #include "support/support_templates.h"
@@ -86,8 +87,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/features/streamer_mode/streamer_mode.h"
 #include "styles/style_ayu_icons.h"
 #include "lang_auto.h"
-#include "ayu/ui/settings/settings_ayu.h"
-
+#include "ayu/ui/settings/settings_main.h"
 
 namespace Window {
 namespace {
@@ -111,7 +111,7 @@ constexpr auto kPlayStatusLimit = 12;
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
 		not_null<Main::Session*> session) {
 	return tr::ayu_AyuPreferences() | rpl::map([](const QString& text) {
-		return Ui::Text::Link(text);
+		return tr::link(text);
 	});
 }
 
@@ -163,7 +163,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 , _current(current) {
 	rpl::single(rpl::empty) | rpl::then(
 		Core::App().unreadBadgeChanges()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_unreadBadgeStale = true;
 		if (!_toggled) {
 			validateUnreadBadge();
@@ -179,7 +179,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 	settings.mainMenuAccountsShownValue(
 	) | rpl::filter([=](bool value) {
 		return (_toggled != value);
-	}) | rpl::start_with_next([=](bool value) {
+	}) | rpl::on_next([=](bool value) {
 		_toggled = value;
 		_toggledAnimation.start(
 			[=] { update(); },
@@ -322,6 +322,15 @@ MainMenu::MainMenu(
 	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
 	kPlayStatusLimit,
 	Info::Profile::BadgeType::Premium))
+, _exteraBadge(std::make_unique<Info::Profile::Badge>(
+	this,
+	st::infoPeerBadge,
+	&controller->session(),
+	ExteraBadgeTypeFromPeer(controller->session().user()),
+	nullptr,
+	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
+	0,
+	Info::Profile::BadgeType::Extera | Info::Profile::BadgeType::ExteraSupporter | Info::Profile::BadgeType::ExteraCustom))
 , _scroll(this, st::defaultSolidScroll)
 , _inner(_scroll->setOwnedWidget(
 	object_ptr<Ui::VerticalLayout>(_scroll.data())))
@@ -351,7 +360,7 @@ MainMenu::MainMenu(
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	widthValue(
-	) | rpl::start_with_next([=](int width) {
+	) | rpl::on_next([=](int width) {
 		const auto line = st::lineWidth;
 		shadow->setGeometry(0, st::mainMenuCoverHeight - line, width, line);
 	}, shadow->lifetime());
@@ -367,7 +376,7 @@ MainMenu::MainMenu(
 	});
 
 	_footer->heightValue(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		_telegram->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuTelegramBottom - _telegram->height());
 		_version->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuVersionBottom - _version->height());
 	}, _footer->lifetime());
@@ -375,18 +384,18 @@ MainMenu::MainMenu(
 	rpl::combine(
 		heightValue(),
 		_inner->heightValue()
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		updateInnerControlsGeometry();
 	}, _inner->lifetime());
 
 	parentResized();
 
-	_telegram->setMarkedText(Ui::Text::Link(
-		u"AyuGram Desktop"_q,
-		u"https://ayugram.one"_q));
+	_telegram->setMarkedText(tr::link(
+		u"SleepyGram Desktop"_q,
+		u"https://github.com/slpkbt/SleepyGram"_q));
 	_telegram->setLinksTrusted();
 	_version->setMarkedText(
-		Ui::Text::Link(
+		tr::link(
 			tr::lng_settings_current_version(
 				tr::now,
 				lt_version,
@@ -395,7 +404,7 @@ MainMenu::MainMenu(
 		.append(QChar(' '))
 		.append(QChar(8211))
 		.append(QChar(' '))
-		.append(Ui::Text::Link(tr::lng_menu_about(tr::now), 2))); // Link 2.
+		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
 	_version->setLink(
 		1,
 		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
@@ -407,16 +416,26 @@ MainMenu::MainMenu(
 
 	rpl::combine(
 		_toggleAccounts->rightSkipValue(),
-		rpl::single(rpl::empty) | rpl::then(_badge->updated())
-	) | rpl::start_with_next([=] {
+		rpl::single(rpl::empty) | rpl::then(_badge->updated()),
+		rpl::single(rpl::empty) | rpl::then(_exteraBadge->updated())
+	) | rpl::on_next([=] {
 		moveBadge();
 	}, lifetime());
 	_badge->setPremiumClickCallback([=] {
 		chooseEmojiStatus();
 	});
+	{
+		const auto user = controller->session().user();
+		const auto isCustomBadge = isCustomBadgePeer(getBareID(user));
+		const auto isExtera = isExteraPeer(getBareID(user));
+		const auto isSupporter = isSupporterPeer(getBareID(user));
+		if (isExtera || isSupporter || isCustomBadge) {
+			_exteraBadge->setPremiumClickCallback(badgeClickHandler(user));
+		}
+	}
 
 	_controller->session().downloaderTaskFinished(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		update();
 	}, lifetime());
 
@@ -430,18 +449,18 @@ MainMenu::MainMenu(
 				[=](const QRect &r) { snowRaw->update(r); });
 			snow->setBrush(QColor(230, 230, 230));
 			_showFinished.value(
-			) | rpl::start_with_next([=](bool shown) {
+			) | rpl::on_next([=](bool shown) {
 				snow->setPaused(!shown);
 			}, snowRaw->lifetime());
 			snowRaw->paintRequest(
-			) | rpl::start_with_next([=](const QRect &r) {
+			) | rpl::on_next([=](const QRect &r) {
 				auto p = Painter(snowRaw);
 				p.fillRect(r, st::mainMenuBg);
 				drawName(p);
 				snow->paint(p, snowRaw->rect());
 			}, snowRaw->lifetime());
 			widthValue(
-			) | rpl::start_with_next([=](int width) {
+			) | rpl::on_next([=](int width) {
 				snowRaw->setGeometry(0, 0, width, st::mainMenuCoverHeight);
 			}, snowRaw->lifetime());
 			snowRaw->show();
@@ -450,7 +469,7 @@ MainMenu::MainMenu(
 			snowLifetime->add([=] { base::unique_qptr{ snowRaw }; });
 		};
 		Window::Theme::IsNightModeValue(
-		) | rpl::start_with_next([=](bool isNightMode) {
+		) | rpl::on_next([=](bool isNightMode) {
 			snowLifetime->destroy();
 			if (isNightMode) {
 				rebuild();
@@ -464,19 +483,42 @@ MainMenu::MainMenu(
 MainMenu::~MainMenu() = default;
 
 void MainMenu::moveBadge() {
-	if (!_badge->widget()) {
+	const auto badgeWidth = _badge->widget()
+		? _badge->widget()->width()
+		: 0;
+	const auto exteraBadgeWidth = _exteraBadge->widget()
+		? _exteraBadge->widget()->width()
+		: 0;
+	if (!badgeWidth && !exteraBadgeWidth) {
 		return;
 	}
+	const auto nameGap = badgeWidth ? st::semiboldFont->spacew : 0;
+	const auto exteraGap = exteraBadgeWidth
+		? st::infoVerifiedCheckPosition.x()
+		: 0;
+	const auto reserved = nameGap
+		+ badgeWidth
+		+ exteraGap
+		+ exteraBadgeWidth;
 	const auto available = width()
 		- st::mainMenuCoverNameLeft
 		- _toggleAccounts->rightSkip()
-		- _badge->widget()->width();
-	const auto left = st::mainMenuCoverNameLeft
-		+ std::min(_name.maxWidth() + st::semiboldFont->spacew, available);
-	_badge->move(
-		left,
-		st::mainMenuCoverNameTop,
-		st::mainMenuCoverNameTop + st::semiboldFont->height);
+		- reserved;
+	const auto nameLeft = st::mainMenuCoverNameLeft;
+	const auto nameEnd = nameLeft
+		+ std::min(_name.maxWidth(), available);
+	if (_badge->widget()) {
+		_badge->move(
+			nameEnd + nameGap,
+			st::mainMenuCoverNameTop,
+			st::mainMenuCoverNameTop + st::semiboldFont->height);
+	}
+	if (_exteraBadge->widget()) {
+		_exteraBadge->move(
+			nameEnd + nameGap + badgeWidth,
+			st::mainMenuCoverNameTop,
+			st::mainMenuCoverNameTop + st::semiboldFont->height);
+	}
 }
 
 void MainMenu::setupArchive() {
@@ -522,7 +564,7 @@ void MainMenu::setupArchive() {
 		{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 	button->setAcceptBoth(true);
 	button->clicks(
-	) | rpl::start_with_next([=](Qt::MouseButton which) {
+	) | rpl::on_next([=](Qt::MouseButton which) {
 		if (which == Qt::LeftButton) {
 			showArchive(button->clickModifiers());
 			return;
@@ -544,7 +586,7 @@ void MainMenu::setupArchive() {
 
 	const auto now = folder();
 	auto folderValue = now
-		? (rpl::single(now) | rpl::type_erased())
+		? (rpl::single(now) | rpl::type_erased)
 		: controller->session().data().chatsListChanges(
 		) | rpl::filter([](Data::Folder *folder) {
 			return folder && (folder->id() == Data::Folder::kId);
@@ -571,7 +613,7 @@ void MainMenu::setupArchive() {
 		controller->session().data().stories().sourcesChanged(
 			Data::StorySourcesList::Hidden
 		)
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		const auto isArchiveVisible = checkArchive();
 		wrap->toggle(isArchiveVisible, anim::type::normal);
 		if (!isArchiveVisible) {
@@ -602,7 +644,7 @@ void MainMenu::setupAccounts() {
 
 	std::move(
 		events.closeRequests
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		closeLayer();
 	}, inner->lifetime());
 
@@ -624,7 +666,7 @@ void MainMenu::setupAccountsToggle() {
 
 void MainMenu::setupSetEmojiStatus() {
 	_setEmojiStatus->overrideLinkClickHandler([=] {
-		_controller->showSettings(Settings::Ayu::Id());
+		_controller->showSettings(Settings::AyuMain::Id());
 	});
 }
 
@@ -634,6 +676,14 @@ void MainMenu::parentResized() {
 
 void MainMenu::showFinished() {
 	_showFinished = true;
+
+	_controller->checkHighlightControl(
+		u"main-menu/emoji-status"_q,
+		_setEmojiStatus,
+		Settings::SubsectionTitleHighlight());
+	_controller->checkHighlightControl(
+		u"main-menu/night-mode"_q,
+		_nightThemeToggle);
 }
 
 void MainMenu::setupMenu() {
@@ -652,6 +702,7 @@ void MainMenu::setupMenu() {
 			std::move(descriptor));
 	};
 	if (!_controller->session().supportMode()) {
+		if (settings.showMyProfileInDrawer())
 		_menu->add(
 			CreateButtonWithIcon(
 				_menu,
@@ -663,12 +714,15 @@ void MainMenu::setupMenu() {
 				Info::Stories::Make(controller->session().user()));
 		});
 
+		if (settings.showBotsInDrawer())
 		SetupMenuBots(_menu, controller);
 
+		if (settings.showMyProfileInDrawer() || settings.showBotsInDrawer())
 		_menu->add(
 			object_ptr<Ui::PlainShadow>(_menu),
 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 
+		if (settings.showNewGroupInDrawer())
 		AddMyChannelsBox(addAction(
 			tr::lng_create_group_title(),
 			{ &st::menuIconGroups }
@@ -678,6 +732,7 @@ void MainMenu::setupMenu() {
 			}
 		});
 
+		if (settings.showNewChannelInDrawer())
 		AddMyChannelsBox(addAction(
 			tr::lng_create_channel_title(),
 			{ &st::menuIconChannel }
@@ -687,18 +742,21 @@ void MainMenu::setupMenu() {
 			}
 		});
 
+		if (settings.showContactsInDrawer())
 		addAction(
 			tr::lng_menu_contacts(),
 			{ &st::menuIconUserShow }
 		)->setClickedCallback([=] {
 			controller->show(PrepareContactsBox(controller));
 		});
+		if (settings.showCallsInDrawer())
 		addAction(
 			tr::lng_menu_calls(),
 			{ &st::menuIconPhone }
 		)->setClickedCallback([=] {
 			::Calls::ShowCallsBox(controller);
 		});
+		if (settings.showSavedMessagesInDrawer())
 		addAction(
 			tr::lng_saved_messages(),
 			{ &st::menuIconSavedMessages }
@@ -706,37 +764,37 @@ void MainMenu::setupMenu() {
 			controller->showPeerHistory(controller->session().user());
 		});
 
-		const auto &settings = AyuSettings::getInstance();
-
-		if (settings.showLReadToggleInDrawer) {
+		if (settings.showLReadToggleInDrawer()) {
 			addAction(
 				tr::ayu_LReadMessages(),
 				{&st::ayuLReadMenuIcon}
-			)->setClickedCallback([=]
+			)->setClickedCallback([=]() mutable
 			{
-				auto prev = settings.sendReadMessages;
-				AyuSettings::set_sendReadMessages(false);
+				auto &ghost = AyuSettings::ghost(&controller->session());
+				const auto prev = ghost.sendReadMessages();
+				ghost.setSendReadMessages(false);
 
-				auto chats = controller->session().data().chatsList();
+				const auto chats = controller->session().data().chatsList();
 				MarkAsReadChatList(chats);
 
-				AyuSettings::set_sendReadMessages(prev);
+				ghost.setSendReadMessages(prev);
 			});
 		}
 
-		if (settings.showSReadToggleInDrawer) {
-			auto callback = [=](Fn<void()> &&close) {
-				auto prev = settings.sendReadMessages;
-				AyuSettings::set_sendReadMessages(true);
+		if (settings.showSReadToggleInDrawer()) {
+			auto callback = [=](Fn<void()> &&close) mutable {
+				auto &ghost = AyuSettings::ghost(&controller->session());
+				const auto prev = ghost.sendReadMessages();
+				ghost.setSendReadMessages(true);
 
 				auto chats = controller->session().data().chatsList();
 				MarkAsReadChatList(chats);
 
 				// slight delay for forums to send packets
-				dispatchToMainThread([=]
-				{
-					AyuSettings::set_sendReadMessages(prev);
-				}, 200);
+				dispatchToMainThread(crl::guard(controller, [=] {
+					auto &ghost = AyuSettings::ghost(&controller->session());
+					ghost.setSendReadMessages(prev);
+				}), 200);
 				close();
 			};
 
@@ -766,7 +824,7 @@ void MainMenu::setupMenu() {
 		)->toggleOn(rpl::single(
 			_controller->session().settings().supportFixChatsOrder()
 		))->toggledChanges(
-		) | rpl::start_with_next([=](bool fix) {
+		) | rpl::on_next([=](bool fix) {
 			_controller->session().settings().setSupportFixChatsOrder(fix);
 			_controller->session().saveSettings();
 		}, _menu->lifetime());
@@ -784,6 +842,8 @@ void MainMenu::setupMenu() {
 		controller->showSettings();
 	});
 
+	if (settings.showNightModeToggleInDrawer()) {
+
 	_nightThemeToggle = addAction(
 		tr::lng_menu_night_mode(),
 		{ &st::menuIconNightMode }
@@ -793,14 +853,14 @@ void MainMenu::setupMenu() {
 	_nightThemeToggle->toggledChanges(
 	) | rpl::filter([=](bool night) {
 		return (night != Window::Theme::IsNightMode());
-	}) | rpl::start_with_next([=](bool night) {
+	}) | rpl::on_next([=](bool night) {
 		if (Window::Theme::Background()->editingTheme()) {
 			_nightThemeSwitches.fire(!night);
 			controller->show(Ui::MakeInformBox(
 				tr::lng_theme_editor_cant_change_theme()));
 			return;
 		}
-		const auto weak = MakeWeak(this);
+		const auto weak = base::make_weak(this);
 		const auto toggle = [=] {
 			if (!weak) {
 				Window::Theme::ToggleNightMode();
@@ -813,31 +873,47 @@ void MainMenu::setupMenu() {
 			&_controller->window(),
 			toggle);
 	}, _nightThemeToggle->lifetime());
+	Core::App().settings().systemDarkModeValue(
+	) | rpl::on_next([=](std::optional<bool> darkMode) {
+		const auto darkModeEnabled
+			= Core::App().settings().systemDarkModeEnabled();
+		if (darkModeEnabled && darkMode.has_value()) {
+			_nightThemeSwitches.fire_copy(*darkMode);
+		}
+	}, _nightThemeToggle->lifetime());
 
-	if (settings.showGhostToggleInDrawer) {
-		_ghostModeToggle = addAction(
-			tr::ayu_GhostModeToggle(),
-			{&st::ayuGhostIcon}
-		)->toggleOn(AyuSettings::get_ghostModeEnabledReactive());
-
-		_ghostModeToggle->toggledChanges(
-		) | rpl::start_with_next(
-			[=](bool ghostMode)
-			{
-				AyuSettings::set_ghostModeEnabled(ghostMode);
-				AyuSettings::save();
-			},
-			_ghostModeToggle->lifetime());
 	}
 
-	if (settings.showStreamerToggleInDrawer) {
-		_streamerModeToggle = addAction(
+	if (settings.showGhostToggleInDrawer()) {
+		auto ghostActiveChanges = AyuSettings::getInstance().useGlobalGhostModeValue()
+			| rpl::map([controller = _controller](bool) {
+				return AyuSettings::ghost(&controller->session()).ghostModeActiveValue();
+			})
+			| rpl::flatten_latest();
+
+		const auto ghostModeToggle = addAction(
+			tr::ayu_GhostModeToggle(),
+			{&st::ayuGhostIcon}
+		)->toggleOn(std::move(ghostActiveChanges));
+
+		ghostModeToggle->toggledChanges(
+		) | rpl::on_next(
+			[controller = _controller](bool ghostMode)
+			{
+				auto &ghost = AyuSettings::ghost(&controller->session());
+				ghost.setGhostModeEnabled(ghostMode);
+			},
+			ghostModeToggle->lifetime());
+	}
+
+	if (settings.showStreamerToggleInDrawer()) {
+		const auto streamerModeToggle = addAction(
 			tr::ayu_StreamerModeToggle(),
 			{&st::ayuStreamerModeMenuIcon}
 		)->toggleOn(rpl::single(AyuFeatures::StreamerMode::isEnabled()));
 
-		_streamerModeToggle->toggledChanges(
-		) | rpl::start_with_next(
+		streamerModeToggle->toggledChanges(
+		) | rpl::on_next(
 			[=](bool enabled)
 			{
 				if (enabled) {
@@ -846,17 +922,8 @@ void MainMenu::setupMenu() {
 					AyuFeatures::StreamerMode::disable();
 				}
 			},
-			_streamerModeToggle->lifetime());
+			streamerModeToggle->lifetime());
 	}
-
-	Core::App().settings().systemDarkModeValue(
-	) | rpl::start_with_next([=](std::optional<bool> darkMode) {
-		const auto darkModeEnabled
-			= Core::App().settings().systemDarkModeEnabled();
-		if (darkModeEnabled && darkMode.has_value()) {
-			_nightThemeSwitches.fire_copy(*darkMode);
-		}
-	}, _nightThemeToggle->lifetime());
 }
 
 void MainMenu::resizeEvent(QResizeEvent *e) {
@@ -948,14 +1015,25 @@ void MainMenu::drawName(Painter &p) {
 	}
 	p.setFont(st::semiboldFont);
 	p.setPen(st::windowBoldFg);
+	const auto badgeWidth = _badge->widget()
+		? _badge->widget()->width()
+		: 0;
+	const auto exteraBadgeWidth = _exteraBadge->widget()
+		? _exteraBadge->widget()->width()
+		: 0;
+	const auto nameGap = badgeWidth ? st::semiboldFont->spacew : 0;
+	const auto exteraGap = exteraBadgeWidth
+		? st::infoVerifiedCheckPosition.x()
+		: 0;
+	const auto reserved = nameGap
+		+ badgeWidth
+		+ exteraGap
+		+ exteraBadgeWidth;
 	_name.drawLeftElided(
 		p,
 		st::mainMenuCoverNameLeft,
 		st::mainMenuCoverNameTop,
-		(widthText
-			- (_badge->widget()
-				? (st::semiboldFont->spacew + _badge->widget()->width())
-				: 0)),
+		widthText - reserved,
 		width());
 }
 
@@ -975,7 +1053,7 @@ void MainMenu::initResetScaleButton() {
 		return (available.width() >= st::windowMinWidth)
 			&& (available.height() >= st::windowMinHeight);
 	}) | rpl::distinct_until_changed(
-	) | rpl::start_with_next([=](bool good) {
+	) | rpl::on_next([=](bool good) {
 		if (good) {
 			_resetScaleButton.destroy();
 		} else {
@@ -1000,8 +1078,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent(
 		if (account.get() == current) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
-			counter += session->data().unreadBadge();
-			if (!session->data().unreadBadgeMuted()) {
+			counter += session->data().unreadWithMentionsBadge();
+			if (!session->data().unreadWithMentionsBadgeMuted()) {
 				allMuted = false;
 			}
 		}
@@ -1025,7 +1103,7 @@ base::EventFilterResult MainMenu::redirectToInnerChecked(not_null<QEvent*> e) {
 	if (_insideEventRedirect) {
 		return base::EventFilterResult::Continue;
 	}
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	_insideEventRedirect = true;
 	QGuiApplication::sendEvent(_inner, e);
 	if (weak) {
@@ -1081,6 +1159,9 @@ void MainMenu::setupSwipe() {
 
 	auto init = [=](int, Qt::LayoutDirection direction) {
 		if (direction != Qt::LeftToRight) {
+			return Ui::Controls::SwipeHandlerFinishData();
+		}
+		if (_emojiStatusPanel && _emojiStatusPanel->hasFocus()) {
 			return Ui::Controls::SwipeHandlerFinishData();
 		}
 		return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {

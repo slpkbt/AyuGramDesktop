@@ -3,7 +3,7 @@
 // We do not and cannot prevent the use of our code,
 // but be respectful and credit the original author.
 //
-// Copyright @Radolyn, 2025
+// Copyright @Radolyn, 2026
 #pragma once
 
 #include "history/history.h"
@@ -47,6 +47,6 @@ void forwardMessages(
 	not_null<Main::Session*> session,
 	const Api::SendAction &action,
 	bool forwardState,
-	Data::ResolvedForwardDraft draft);
+	const Data::ResolvedForwardDraft &draft);
 
 }

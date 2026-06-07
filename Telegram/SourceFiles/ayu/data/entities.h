@@ -3,12 +3,12 @@
 // We do not and cannot prevent the use of our code,
 // but be respectful and credit the original author.
 //
-// Copyright @Radolyn, 2025
+// Copyright @Radolyn, 2026
 #pragma once
 
 #include <string>
 
-#define ID long long
+using ID = long long;
 
 class AyuMessageBase
 {
@@ -80,7 +80,28 @@ public:
 	bool enabled;
 	bool reversed;
 	bool caseInsensitive;
-	std::unique_ptr<ID> dialogId; // nullable
+	std::optional<ID> dialogId; // nullable
+
+	bool operator==(const RegexFilter &other) const {
+		return id == other.id &&
+			text == other.text &&
+			caseInsensitive == other.caseInsensitive &&
+			reversed == other.reversed &&
+			dialogId == other.dialogId &&
+			enabled == other.enabled;
+	}
+	[[nodiscard]] QJsonObject toJson() const {
+		QJsonObject json;
+		json["id"] = QString::fromUtf8(id.data());
+		json["text"] = QString::fromStdString(text);
+		json["enabled"] = enabled;
+		json["reversed"] = reversed;
+		json["caseInsensitive"] = caseInsensitive;
+		if (dialogId.has_value()) {
+			json["dialogId"] = dialogId.value();
+		}
+		return json;
+	}
 };
 
 class RegexFilterGlobalExclusion
@@ -89,6 +110,10 @@ public:
 	ID fakeId;
 	ID dialogId;
 	std::vector<char> filterId;
+
+	bool operator==(const RegexFilterGlobalExclusion& other) const {
+		return dialogId == other.dialogId && filterId == other.filterId;
+	}
 };
 
 class SpyMessageRead

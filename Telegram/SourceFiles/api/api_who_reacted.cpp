@@ -31,6 +31,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
+// AyuGram includes
+#include "ayu/ayu_settings.h"
+#include "ayu/features/filters/filters_controller.h"
+
+
 namespace Api {
 namespace {
 
@@ -116,6 +121,7 @@ struct Userpic {
 	TimeId date = 0;
 	bool dateReacted = false;
 	QString customEntityData;
+	ReactionId reaction;
 	mutable Ui::PeerUserpicView view;
 	mutable InMemoryKey uniqueKey;
 };
@@ -127,6 +133,26 @@ struct State {
 	bool someUserpicsNotLoaded = false;
 	bool scheduled = false;
 };
+
+[[nodiscard]] bool ApplyReactionsRemovedToCachedData(
+		PeersWithReactions &data,
+		const Data::ReactionsRemoved &update) {
+	const auto was = data.list.size();
+	data.list.erase(
+		ranges::remove_if(data.list, [&](const PeerWithReaction &entry) {
+			return !entry.reaction.empty()
+				&& entry.peerWithDate.peer == update.participant->id;
+		}),
+		end(data.list));
+	const auto removed = int(was - data.list.size());
+	if (!removed) {
+		return false;
+	}
+	data.fullReactionsCount = (data.fullReactionsCount > removed)
+		? (data.fullReactionsCount - removed)
+		: 0;
+	return true;
+}
 
 [[nodiscard]] auto Contexts()
 -> base::flat_map<not_null<QWidget*>, std::unique_ptr<Context>> & {
@@ -174,7 +200,7 @@ struct State {
 	}
 	session->changes().messageUpdates(
 		Data::MessageUpdate::Flag::Destroyed
-	) | rpl::start_with_next([=](const Data::MessageUpdate &update) {
+	) | rpl::on_next([=](const Data::MessageUpdate &update) {
 		const auto i = context->cachedRead.find(update.item);
 		if (i != end(context->cachedRead)) {
 			session->api().request(i->second.requestId).cancel();
@@ -188,11 +214,27 @@ struct State {
 			context->cachedReacted.erase(j);
 		}
 	}, context->subscriptions[session]);
+	session->data().reactionsRemoved(
+	) | rpl::on_next([=](const Data::ReactionsRemoved &update) {
+		for (auto &[item, map] : context->cachedReacted) {
+			if (item->history()->peer->id != update.peer->id) {
+				continue;
+			} else if (update.msgId && item->id != update.msgId) {
+				continue;
+			}
+			for (auto &entry : map) {
+				auto data = entry.second.data.current();
+				if (ApplyReactionsRemovedToCachedData(data, update)) {
+					entry.second.data = std::move(data);
+				}
+			}
+		}
+	}, context->subscriptions[session]);
 	Data::AmPremiumValue(
 		session
 	) | rpl::skip(1) | rpl::filter(
 		rpl::mappers::_1
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &[item, cache] : context->cachedRead) {
 			if (cache.data.current().state == Ui::WhoReadState::MyHidden) {
 				cache.data = Peers{ .state = Ui::WhoReadState::Unknown };
@@ -202,7 +244,7 @@ struct State {
 	session->api().globalPrivacy().hideReadTime(
 	) | rpl::skip(1) | rpl::filter(
 		!rpl::mappers::_1
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		for (auto &[item, cache] : context->cachedRead) {
 			if (cache.data.current().state == Ui::WhoReadState::MyHidden) {
 				cache.data = Peers{ .state = Ui::WhoReadState::Unknown };
@@ -240,19 +282,19 @@ struct State {
 [[nodiscard]] rpl::producer<Peers> WhoReadIds(
 		not_null<HistoryItem*> item,
 		not_null<QWidget*> context) {
-	auto weak = QPointer<QWidget>(context.get());
+	auto weak = base::make_weak(context);
 	const auto session = &item->history()->session();
 	return [=](auto consumer) {
 		if (!weak) {
 			return rpl::lifetime();
 		}
-		const auto context = PreparedContextAt(weak.data(), session);
+		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheRead(item);
 		if (entry.requestId) {
 		} else if (const auto user = item->history()->peer->asUser()) {
 			entry.requestId = session->api().request(
 				MTPmessages_GetOutboxReadDate(
-					user->input,
+					user->input(),
 					MTP_int(item->id)
 				)
 			).done([=](const MTPOutboxReadDate &result) {
@@ -282,7 +324,7 @@ struct State {
 		} else {
 			entry.requestId = session->api().request(
 				MTPmessages_GetMessageReadParticipants(
-					item->history()->peer->input,
+					item->history()->peer->input(),
 					MTP_int(item->id)
 				)
 			).done([=](const MTPVector<MTPReadParticipantDate> &result) {
@@ -325,13 +367,13 @@ struct State {
 		not_null<HistoryItem*> item,
 		const ReactionId &reaction,
 		not_null<QWidget*> context) {
-	auto weak = QPointer<QWidget>(context.get());
+	auto weak = base::make_weak(context);
 	const auto session = &item->history()->session();
 	return [=](auto consumer) {
 		if (!weak) {
 			return rpl::lifetime();
 		}
-		const auto context = PreparedContextAt(weak.data(), session);
+		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheReacted(item, reaction);
 		if (!entry.requestId) {
 			using Flag = MTPmessages_GetMessageReactionsList::Flag;
@@ -340,7 +382,7 @@ struct State {
 					MTP_flags(reaction.empty()
 						? Flag(0)
 						: Flag::f_reaction),
-					item->history()->peer->input,
+					item->history()->peer->input(),
 					MTP_int(item->id),
 					ReactionToMTP(reaction),
 					MTPstring(), // offset
@@ -441,14 +483,26 @@ bool UpdateUserpics(
 		};
 	}) | ranges::views::filter([](ResolvedPeer resolved) {
 		return resolved.peer != nullptr;
+	}) | ranges::views::filter([](const ResolvedPeer &resolved) {
+		return !FiltersController::isBlocked(resolved.peer);
 	}) | ranges::to_vector;
 
-	const auto same = ranges::equal(
-		state->userpics,
-		peers,
-		ranges::equal_to(),
-		[](const Userpic &u) { return std::pair(u.peer.get(), u.date); },
-		[](const ResolvedPeer &r) { return std::pair(r.peer, r.date); });
+	const auto same = [&] {
+		if (state->userpics.size() != peers.size()) {
+			return false;
+		}
+		const auto count = state->userpics.size();
+		for (auto i = size_t(); i != count; ++i) {
+			const auto &userpic = state->userpics[i];
+			const auto &resolved = peers[i];
+			if ((userpic.peer.get() != resolved.peer)
+				|| (userpic.date != resolved.date)
+				|| (userpic.reaction != resolved.reaction)) {
+				return false;
+			}
+		}
+		return true;
+	}();
 	if (same) {
 		return false;
 	}
@@ -461,6 +515,7 @@ bool UpdateUserpics(
 		if (i != end(was) && i->view.cloud) {
 			i->date = resolved.date;
 			i->dateReacted = resolved.dateReacted;
+			i->reaction = resolved.reaction;
 			now.push_back(std::move(*i));
 			now.back().customEntityData = data;
 			continue;
@@ -470,6 +525,7 @@ bool UpdateUserpics(
 			.date = resolved.date,
 			.dateReacted = resolved.dateReacted,
 			.customEntityData = data,
+			.reaction = resolved.reaction,
 		});
 		auto &userpic = now.back();
 		userpic.uniqueKey = peer->userpicUniqueKey(userpic.view);
@@ -512,11 +568,15 @@ void RegenerateParticipants(not_null<State*> state, int small, int large) {
 		const auto peer = userpic.peer;
 		const auto date = userpic.date;
 		const auto id = peer->id.value;
+		const auto self = peer->isSelf();
 		const auto was = ranges::find(old, id, &Ui::WhoReadParticipant::id);
 		if (was != end(old)) {
 			was->name = peer->name();
 			was->date = FormatReadDate(date, currentDate);
 			was->dateReacted = userpic.dateReacted;
+			was->self = self;
+			was->customEntityData = userpic.customEntityData;
+			was->reaction = userpic.reaction;
 			now.push_back(std::move(*was));
 			continue;
 		}
@@ -524,7 +584,9 @@ void RegenerateParticipants(not_null<State*> state, int small, int large) {
 			.name = peer->name(),
 			.date = FormatReadDate(date, currentDate),
 			.dateReacted = userpic.dateReacted,
+			.self = self,
 			.customEntityData = userpic.customEntityData,
+			.reaction = userpic.reaction,
 			.userpicLarge = GenerateUserpic(userpic, large),
 			.userpicKey = userpic.uniqueKey,
 			.id = id,
@@ -590,7 +652,7 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 		}
 		std::move(
 			idsWithReactions
-		) | rpl::start_with_next([=](PeersWithReactions &&peers) {
+		) | rpl::on_next([=](PeersWithReactions &&peers) {
 			if (peers.state == WhoReadState::Unknown) {
 				state->userpics.clear();
 				consumer.put_next(Ui::WhoReadContent{
@@ -601,9 +663,29 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 				});
 				return;
 			}
+			auto &owner = item->history()->owner();
+			auto blockedReactionsCount = 0;
+			const auto &settings = AyuSettings::getInstance();
+			if (settings.filtersEnabled()) {
+				peers.list.erase(ranges::remove_if(peers.list, [&](const PeerWithReaction &p) {
+					const auto peer = owner.peerLoaded(p.peerWithDate.peer);
+					if (peer && FiltersController::isBlocked(peer)) {
+						if (!p.reaction.empty()) {
+							++blockedReactionsCount;
+						}
+						return true;
+					}
+					return false;
+				}), end(peers.list));
+				peers.read.erase(ranges::remove_if(peers.read, [&](const WhoReadPeer &p) {
+					const auto peer = owner.peerLoaded(p.peer);
+					return peer && FiltersController::isBlocked(peer);
+				}), end(peers.read));
+			}
+
 			state->current.state = peers.state;
 			state->current.fullReadCount = int(peers.read.size());
-			state->current.fullReactionsCount = peers.fullReactionsCount;
+			state->current.fullReactionsCount = peers.fullReactionsCount - blockedReactionsCount;
 			if (whoReadIds) {
 				const auto reacted = peers.list.size() - ranges::count(
 					peers.list,
@@ -624,7 +706,7 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 		item->history()->session().downloaderTaskFinished(
 		) | rpl::filter([=] {
 			return state->someUserpicsNotLoaded && !state->scheduled;
-		}) | rpl::start_with_next([=] {
+		}) | rpl::on_next([=] {
 			for (const auto &userpic : state->userpics) {
 				if (userpic.peer->userpicUniqueKey(userpic.view)
 					!= userpic.uniqueKey) {
@@ -652,28 +734,40 @@ QString FormatReadDate(TimeId date, const QDateTime &now) {
 	const auto parsed = base::unixtime::parse(date);
 	const auto readDate = parsed.date();
 	const auto nowDate = now.date();
+	const auto &settings = AyuSettings::getInstance();
+
+	if (readDate.year() < nowDate.year()) {
+		return tr::lng_mediaview_date_time(
+			tr::now,
+			lt_date,
+			tr::lng_month_day_year(
+				tr::now,
+				lt_month,
+				Lang::MonthDay(readDate.month())(tr::now),
+				lt_day,
+				QString::number(readDate.day()),
+				lt_year,
+				QString::number(readDate.year())),
+			lt_time,
+			QLocale().toString(parsed.time(), settings.showMessageSeconds() ? "HH:mm:ss" : QLocale::system().timeFormat(QLocale::ShortFormat)));
+	}
 	if (readDate == nowDate) {
 		return tr::lng_mediaview_today(
 			tr::now,
 			lt_time,
-			QLocale().toString(parsed.time(), "HH:mm:ss"));
+			QLocale().toString(parsed.time(), settings.showMessageSeconds() ? "HH:mm:ss" : QLocale::system().timeFormat(QLocale::ShortFormat)));
 	} else if (readDate.addDays(1) == nowDate) {
 		return tr::lng_mediaview_yesterday(
 			tr::now,
 			lt_time,
-			QLocale().toString(parsed.time(), "HH:mm:ss"));
+			QLocale().toString(parsed.time(), settings.showMessageSeconds() ? "HH:mm:ss" : QLocale::system().timeFormat(QLocale::ShortFormat)));
 	}
 	return tr::lng_mediaview_date_time(
 		tr::now,
 		lt_date,
-		tr::lng_month_day(
-			tr::now,
-			lt_month,
-			Lang::MonthDay(readDate.month())(tr::now),
-			lt_day,
-			QString::number(readDate.day())),
+		langDayOfMonthShort(readDate),
 		lt_time,
-		QLocale().toString(parsed.time(), "HH:mm:ss"));
+		QLocale().toString(parsed.time(), settings.showMessageSeconds() ? "HH:mm:ss" : QLocale::system().timeFormat(QLocale::ShortFormat)));
 }
 
 bool WhoReadExists(not_null<HistoryItem*> item) {

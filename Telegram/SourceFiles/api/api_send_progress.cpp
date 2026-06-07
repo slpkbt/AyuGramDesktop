@@ -118,8 +118,8 @@ void SendProgressManager::send(const Key &key, int progress) {
 	}
 
 	// AyuGram sendUploadProgress
-	const auto &settings = AyuSettings::getInstance();
-	if (!settings.sendUploadProgress)
+	const auto &ghost = AyuSettings::ghost(_session);
+	if (!ghost.sendUploadProgress())
 	{
 		DEBUG_LOG(("[AyuGram] Don't send upload progress"));
 		return;
@@ -150,7 +150,7 @@ void SendProgressManager::send(const Key &key, int progress) {
 		MTP_flags(key.topMsgId
 			? MTPmessages_SetTyping::Flag::f_top_msg_id
 			: MTPmessages_SetTyping::Flag(0)),
-		key.history->peer->input,
+		key.history->peer->input(),
 		MTP_int(key.topMsgId),
 		action
 	)).done([=](const MTPBool &result, mtpRequestId requestId) {

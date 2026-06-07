@@ -3,33 +3,30 @@
 // We do not and cannot prevent the use of our code,
 // but be respectful and credit the original author.
 //
-// Copyright @Radolyn, 2025
+// Copyright @Radolyn, 2026
 #pragma once
 
 #include "settings/settings_common.h"
 #include "settings/settings_common_session.h"
 
-class BoxContent;
-
 namespace Window {
-class Controller;
 class SessionController;
 } // namespace Window
 
 namespace Settings {
 
-class Ayu : public Section<Ayu>
-{
+class AyuGhost : public Section<AyuGhost> {
 public:
-	Ayu(QWidget *parent, not_null<Window::SessionController*> controller);
+	AyuGhost(QWidget *parent, not_null<Window::SessionController*> controller);
 
 	[[nodiscard]] rpl::producer<QString> title() override;
 
-	void fillTopBarMenu(
-		const Ui::Menu::MenuCallback &addAction) override;
-
 private:
-	void setupContent(not_null<Window::SessionController*> controller);
+	void setupContent();
+
+	not_null<Window::SessionController*> _controller;
 };
+
+[[nodiscard]] Type AyuGhostId();
 
 } // namespace Settings

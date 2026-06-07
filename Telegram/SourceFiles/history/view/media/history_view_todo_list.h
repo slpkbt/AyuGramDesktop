@@ -65,6 +65,7 @@ public:
 	bool hasHeavyPart() const override;
 
 	void hideSpoilers() override;
+	void revealSpoilers() override;
 
 	std::vector<TodoTaskInfo> takeTasksInfo() override;
 
@@ -116,6 +117,11 @@ private:
 		int left,
 		int top,
 		int paintw,
+		const PaintContext &context) const;
+	void appendTaskHighlight(
+		int id,
+		int top,
+		int height,
 		const PaintContext &context) const;
 
 	void radialAnimationCallback() const;

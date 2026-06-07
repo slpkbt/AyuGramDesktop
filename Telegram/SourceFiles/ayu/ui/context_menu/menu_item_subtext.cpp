@@ -3,16 +3,13 @@
 // We do not and cannot prevent the use of our code,
 // but be respectful and credit the original author.
 //
-// Copyright @Radolyn, 2025
-#include <utility>
-
+// Copyright @Radolyn, 2026
 #include "ayu/ui/context_menu/menu_item_subtext.h"
 
 #include "mainwindow.h"
 #include "qguiapplication.h"
 #include "ayu/data/entities.h"
 #include "ayu/utils/telegram_helpers.h"
-
 #include "base/unixtime.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
@@ -23,6 +20,8 @@
 #include "ui/widgets/menu/menu_action.h"
 #include "window/window_session_controller.h"
 
+#include <utility>
+
 namespace Ui {
 namespace {
 
@@ -30,7 +29,7 @@ class ActionWithSubText : public Menu::ItemBase
 {
 public:
 	ActionWithSubText(
-		not_null<RpWidget*> parent,
+		not_null<Ui::Menu::Menu*> parent,
 		const style::Menu &st,
 		const style::icon &icon,
 		Fn<void()> callback,
@@ -81,7 +80,7 @@ TextParseOptions MenuTextOptions = {
 };
 
 ActionWithSubText::ActionWithSubText(
-	not_null<RpWidget*> parent,
+	not_null<Ui::Menu::Menu*> parent,
 	const style::Menu &st,
 	const style::icon &icon,
 	Fn<void()> callback,
@@ -97,11 +96,11 @@ ActionWithSubText::ActionWithSubText(
 		  + st::ttlItemTimerFont->height
 		  + st::ttlItemPadding.bottom()) {
 	setAcceptBoth(true);
-	initResizeHook(parent->sizeValue());
-	setClickedCallback(std::move(callback));
+	fitToMenuWidth();
+	setActionTriggered(std::move(callback));
 
 	paintRequest(
-	) | rpl::start_with_next([=]
+	) | rpl::on_next([=]
 							 {
 								 Painter p(this);
 								 paint(p);
@@ -219,19 +218,19 @@ ActionStickerPackAuthor::ActionStickerPackAuthor(not_null<Menu::Menu*> menu,
 
 void ActionStickerPackAuthor::searchAuthor(ID authorId) {
 	const auto session = _session;
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 
-	searchById(
+	searchUserById(
 		authorId,
 		session,
-		[session, weak, authorId](const QString &username, UserData *user)
+		[session, weak, authorId](const QString &username, PeerData *user)
 		{
 			if (!weak) {
 				LOG(("ContextActionStickerAuthor: searchById callback after destruction"));
 				return;
 			}
 
-			const auto strong = weak.data();
+			const auto strong = weak.get();
 			if (!strong) {
 				LOG(("ContextActionStickerAuthor: weak.data() returned null"));
 				return;
@@ -239,7 +238,7 @@ void ActionStickerPackAuthor::searchAuthor(ID authorId) {
 
 			if (username.isEmpty() && !user) {
 				strong->_subText = QString(tr::ayu_MessageDetailsPackOwnerNotFoundPC(tr::now));
-				strong->setClickedCallback(
+				strong->setActionTriggered(
 					[authorId, session]
 					{
 						QGuiApplication::clipboard()->setText(QString::number(authorId));
@@ -253,7 +252,7 @@ void ActionStickerPackAuthor::searchAuthor(ID authorId) {
 				crl::on_main(
 					[weak]
 					{
-						if (const auto strongInner = weak.data()) {
+						if (const auto strongInner = weak.get()) {
 							strongInner->update();
 						}
 					});
@@ -274,12 +273,12 @@ void ActionStickerPackAuthor::searchAuthor(ID authorId) {
 				}
 			};
 
-			strong->setClickedCallback(callback);
+			strong->setActionTriggered(callback);
 			strong->_subText = QString(title);
 			crl::on_main(
 				[weak]
 				{
-					if (const auto strongInner = weak.data()) {
+					if (const auto strongInner = weak.get()) {
 						strongInner->update();
 					}
 				});
