@@ -26,10 +26,12 @@ SleepyGram uses its own application identifiers, executable name, and data direc
 
 ## Build
 
-Use the workflow in `.github/workflows/build.yml` to build Windows, Linux, and macOS artifacts. The workflow requires:
+Use the workflow in `.github/workflows/build.yml` to build Windows, Linux, and macOS artifacts. The workflow requires API credentials. Preferred secret names:
 
 - `TDESKTOP_API_ID`
 - `TDESKTOP_API_HASH`
+
+For temporary AyuGram reuse, the workflow also accepts `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`, or `API_ID` / `API_HASH`.
 
 Artifacts produced by CI:
 

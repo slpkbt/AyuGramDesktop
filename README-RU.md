@@ -28,10 +28,12 @@ SleepyGram использует отдельные application ids, имя би�
 
 ## Сборка
 
-GitHub Actions workflow лежит в `.github/workflows/build.yml` и собирает Windows, Linux и macOS artifacts. Для сборки нужны secrets:
+GitHub Actions workflow лежит в `.github/workflows/build.yml` и собирает Windows, Linux и macOS artifacts. Для сборки нужны API credentials. Основные имена secrets:
 
 - `TDESKTOP_API_ID`
 - `TDESKTOP_API_HASH`
+
+Для временного reuse AyuGram workflow также принимает `AYUGRAM_API_ID` / `AYUGRAM_API_HASH`, `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` или `API_ID` / `API_HASH`.
 
 Artifacts:
 
