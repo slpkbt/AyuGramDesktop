@@ -875,6 +875,9 @@ MessageFlags FlagsFromMTP(
 			: Flag())
 		| ((flags & MTP::f_summary_from_language)
 			? Flag::CanBeSummarized
+			: Flag())
+		| ((flags & MTP::f_guestchat_via_from)
+			? Flag::GuestChatViaFrom
 			: Flag());
 }
 
@@ -1332,9 +1335,9 @@ void CheckPollVoteNotificationSchedule(
 }
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
-	const auto siteLink = u"https://t.me/AyuGramReleases"_q;
+	const auto siteLink = u"https://github.com/slpkbt/AyuGramDesktop/releases"_q;
 	auto result = TextWithEntities{
-		tr::lng_message_unsupported(tr::now, lt_link, siteLink).replace("Telegram", "AyuGram")
+		tr::lng_message_unsupported(tr::now, lt_link, siteLink).replace("Telegram", "SleepyGram")
 	};
 	TextUtilities::ParseEntities(result, Ui::ItemTextNoMonoOptions().flags);
 	result.entities.push_front(

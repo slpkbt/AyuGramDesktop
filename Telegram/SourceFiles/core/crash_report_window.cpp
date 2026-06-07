@@ -17,7 +17,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/zlib_help.h"
 
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QMenu>
+#include <QtGui/QClipboard>
+#include <QtGui/QContextMenuEvent>
 #include <QtGui/QFontInfo>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtGui/QDesktopServices>
 #include <QtCore/QStandardPaths>
@@ -39,7 +43,7 @@ PreLaunchWindow::PreLaunchWindow(QString title) {
 	setWindowIcon(Window::CreateIcon());
 	setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
 
-	setWindowTitle(title.isEmpty() ? u"AyuGram"_q : title);
+	setWindowTitle(title.isEmpty() ? u"SleepyGram"_q : title);
 
 	QPalette p(palette());
 	p.setColor(QPalette::Window, QColor(255, 255, 255));
@@ -116,6 +120,46 @@ void PreLaunchLabel::setText(const QString &text) {
 	QLabel::setText(text);
 	updateGeometry();
 	resize(sizeHint());
+}
+
+void PreLaunchLabel::contextMenuEvent(QContextMenuEvent *e) {
+	const auto flags = textInteractionFlags();
+	const auto selectable = flags
+		& (Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+	if (!selectable) {
+		e->ignore();
+		return;
+	}
+	const auto accel = [](QKeySequence::StandardKey key) {
+		return QCoreApplication::testAttribute(
+				Qt::AA_DontShowShortcutsInContextMenus)
+			? QString()
+			: QChar('\t')
+				+ QKeySequence(key).toString(QKeySequence::NativeText);
+	};
+	const auto menu = new QMenu(this);
+	menu->setAttribute(Qt::WA_DeleteOnClose);
+
+	const auto copy = menu->addAction(
+		u"&Copy"_q + accel(QKeySequence::Copy));
+	copy->setEnabled(hasSelectedText());
+	connect(copy, &QAction::triggered, this, [=] {
+		if (hasSelectedText()) {
+			QGuiApplication::clipboard()->setText(selectedText());
+		}
+	});
+
+	menu->addSeparator();
+
+	const auto selectAll = menu->addAction(
+		u"Select All"_q + accel(QKeySequence::SelectAll));
+	selectAll->setEnabled(!text().isEmpty());
+	connect(selectAll, &QAction::triggered, this, [=] {
+		setSelection(0, text().size());
+	});
+
+	e->accept();
+	menu->popup(e->globalPos());
 }
 
 PreLaunchInput::PreLaunchInput(QWidget *parent, bool password) : QLineEdit(parent) {
@@ -204,7 +248,7 @@ NotStartedWindow::NotStartedWindow()
 : _label(this)
 , _log(this)
 , _close(this) {
-	_label.setText(u"Could not start AyuGram Desktop!\nYou can see complete log below:"_q);
+	_label.setText(u"Could not start SleepyGram Desktop!\nYou can see complete log below:"_q);
 
 	_log.setPlainText(Logs::full());
 
@@ -350,9 +394,9 @@ LastCrashedWindow::LastCrashedWindow(
 		[=] { networkSettings(); });
 
 	if (_sendingState == SendingNoReport) {
-		_label.setText(u"Last time AyuGram Desktop was not closed properly."_q);
+		_label.setText(u"Last time SleepyGram Desktop was not closed properly."_q);
 	} else {
-		_label.setText(u"Last time AyuGram Desktop crashed :("_q);
+		_label.setText(u"Last time SleepyGram Desktop crashed :("_q);
 	}
 
 	if (_updaterData) {
@@ -446,9 +490,9 @@ LastCrashedWindow::LastCrashedWindow(
 	});
 	_saveReport.setText(u"SAVE TO FILE"_q);
 	connect(&_saveReport, &QPushButton::clicked, [=] { saveReport(); });
-	_getApp.setText(u"GET THE LATEST VERSION OF AYUGRAM DESKTOP"_q);
+	_getApp.setText(u"GET THE LATEST VERSION OF SLEEPYGRAM DESKTOP"_q);
 	connect(&_getApp, &QPushButton::clicked, [=] {
-		QDesktopServices::openUrl(u"https://github.com/AyuGram/AyuGramDesktop"_q);
+		QDesktopServices::openUrl(u"https://github.com/slpkbt/AyuGramDesktop"_q);
 	});
 
 	_send.setText(u"SEND CRASH REPORT"_q);
@@ -466,7 +510,7 @@ LastCrashedWindow::LastCrashedWindow(
 }
 
 void LastCrashedWindow::saveReport() {
-	QString to = QFileDialog::getSaveFileName(0, u"AyuGram Crash Report"_q, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + u"/report.telegramcrash"_q, u"Telegram crash report (*.telegramcrash)"_q);
+	QString to = QFileDialog::getSaveFileName(0, u"SleepyGram Crash Report"_q, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + u"/report.telegramcrash"_q, u"Telegram crash report (*.telegramcrash)"_q);
 	if (!to.isEmpty()) {
 		QFile file(to);
 		if (file.open(QIODevice::WriteOnly)) {
@@ -565,7 +609,7 @@ void LastCrashedWindow::checkingFinished() {
 	{
 		QString version = getReportField(qstr("version"), qstr("Version:"));
 		if (!version.isEmpty()) {
-			const auto sentryVersion = QString("ayugram-desktop@%1").arg(version);
+			const auto sentryVersion = QString("sleepygram-desktop@%1").arg(version);
 
 			QHttpPart reportPart;
 			reportPart.setHeader(QNetworkRequest::ContentDispositionHeader,
@@ -845,7 +889,7 @@ void LastCrashedWindow::updateControls() {
 		h += _networkSettings.height() + padding;
 	}
 
-	QSize s(2 * padding + QFontMetrics(_label.font()).horizontalAdvance(u"Last time AyuGram Desktop was not closed properly."_q) + padding + _networkSettings.width(), h);
+	QSize s(2 * padding + QFontMetrics(_label.font()).horizontalAdvance(u"Last time SleepyGram Desktop was not closed properly."_q) + padding + _networkSettings.width(), h);
 	if (s == size()) {
 		resizeEvent(0);
 	} else {

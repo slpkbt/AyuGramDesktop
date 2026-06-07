@@ -18,11 +18,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif // TDESKTOP_ALLOW_CLOSED_ALPHA
 
 // used in Updater.cpp and Setup.iss for Windows
-constexpr auto AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D666}"_cs;
-constexpr auto AppNameOld = "AyuGram for Windows"_cs;
-constexpr auto AppName = "AyuGram Desktop"_cs;
-constexpr auto AppFile = "AyuGram"_cs;
-constexpr auto AppVersion = 6007008;
-constexpr auto AppVersionStr = "6.7.8";
+constexpr auto AppId = "{09F8EFBD-99A0-4326-9A2F-2694574B75CB}"_cs;
+constexpr auto AppNameOld = "SleepyGram for Windows"_cs;
+constexpr auto AppName = "SleepyGram Desktop"_cs;
+constexpr auto AppFile = "SleepyGram"_cs;
+constexpr auto AppVersion = 6008002;
+constexpr auto AppVersionStr = "6.8.2";
 constexpr auto AppBetaVersion = false;
 constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;

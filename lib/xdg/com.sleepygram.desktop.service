@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.sleepygram.desktop
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/SleepyGram

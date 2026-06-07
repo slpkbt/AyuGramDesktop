@@ -1,162 +1,49 @@
-# AyuGram
+# SleepyGram Desktop
 
-![AyuGram Лого](.github/AyuGram.png) ![AyuChan](.github/AyuChan.png)
+[ English  |  [Русский](README-RU.md) ]
 
-[ [English](README.md)  | Русский ]
+SleepyGram Desktop - форк Telegram Desktop 6.8.2 stable с сохраненным расширенным набором функций.
 
-## Функции и Фишки
+## Функции
 
-- Полный режим призрака (настраиваемый)
-- История удалений и изменений сообщений
-- Кастомизация шрифта
-- Режим Стримера
-- Локальный телеграм премиум
+- Полный Ghost Mode
+- История сообщений
+- Anti-recall
+- Кастомизация шрифтов
+- Streamer Mode
+- Локальный Telegram Premium
 - Переводчик
-- Превью медиа и быстрая реакция при сильном нажатии на тачпад (macOS)
-- Улучшенный вид
+- Превью медиа и быстрая реакция при force click на macOS
+- Расширенные настройки внешнего вида
 
-И многое другое. Посмотрите нашу [Документацию](https://docs.ayugram.one/desktop/) для более подробной информации.
+## Identity
 
-<h3>
-  <details>
-    <summary>Превью</summary>
-    <table>
-      <tr>
-        <td><img src='.github/demos/demo1.png' width='268' alt='Preferences'></td>
-        <td><img src='.github/demos/demo2.png' width='268' alt='AyuGram Options'></td>
-        <td><img src='.github/demos/demo3.png' width='268' alt='Message Filters'></td>
-      </tr>
-      <tr>
-        <td><img src='.github/demos/demo4.png' width='268' alt='Appearance'></td>
-        <td><img src='.github/demos/demo5.png' width='268' alt='Chats'></td>
-      </tr>
-    </table>
-  </details>
-</h3>
+SleepyGram использует отдельные application ids, имя бинаря и директории данных. Клиент стартует отдельно и не использует существующий профиль.
 
-## Установка
+- Product name: `SleepyGram Desktop`
+- Executable name: `SleepyGram`
+- macOS bundle id: `com.sleepygram.desktop`
+- Linux app id: `com.sleepygram.desktop`
+- Windows app id: `{09F8EFBD-99A0-4326-9A2F-2694574B75CB}`
 
-### Windows
+## Сборка
 
-#### Официальная версия
+GitHub Actions workflow лежит в `.github/workflows/build.yml` и собирает Windows, Linux и macOS artifacts. Для сборки нужны secrets:
 
-Вы можете скачать готовый бинарный файл со вкладки [Releases](https://github.com/AyuGram/AyuGramDesktop/releases) или из
-[Телеграм канала](https://t.me/AyuGramReleases).
+- `TDESKTOP_API_ID`
+- `TDESKTOP_API_HASH`
 
-#### Winget
+Artifacts:
 
-```bash
-winget install RadolynLabs.AyuGramDesktop
-```
+- `SleepyGram-windows-x64.zip`
+- `SleepyGram-linux-x64.tar.xz`
+- `SleepyGram-macos-x64.zip`
 
-#### Scoop
+Auto-update в CI artifacts отключен.
 
-```bash
-scoop bucket add extras
-scoop install ayugram
-```
+## Credits
 
-#### Сборка вручную
-
-Следуйте [официальному руководству](https://github.com/AyuGram/AyuGramDesktop/blob/dev/docs/building-win-x64.md), если
-вы хотите собрать AyuGram сами.
-
-### macOS
-
-#### Официальная версия
-
-Вы можете скачать подписанный пакет со вкладки [Releases](https://github.com/AyuGram/AyuGramDesktop/releases).
-
-#### Homebrew
-
-```bash
-brew install --cask ayugram
-```
-
-### Arch Linux
-
-#### Из исходников (рекомендованный способ)
-
-Установите `ayugram-desktop` из [AUR](https://aur.archlinux.org/packages/ayugram-desktop).
-
-#### Готовые бинарники
-
-Установите `ayugram-desktop-bin` из [AUR](https://aur.archlinux.org/packages/ayugram-desktop-bin).
-
-Примечание: данный пакет собирается не нами.
-
-### NixOS
-
-#### Флейк (рекомендуется)
-
-Установите `ayugram-desktop` из [ndfined-crp/ayugram-desktop](https://github.com/ndfined-crp/ayugram-desktop)
-
-#### Nixpkgs
-
-Установите `ayugram-desktop` из [nixpkgs](https://search.nixos.org/packages?channel=unstable&show=ayugram-desktop)
-
-### ALT Linux
-
-[Sisyphus](https://packages.altlinux.org/en/sisyphus/srpms/ayugram-desktop/)
-
-### Gentoo Linux
-
-Инструкцию по установке можно найти в [этом репозитории](https://codeberg.org/OverLessArtem/ayugram-ebuild-gentoo).
-
-### Void Linux
-Инструкцию по установке можно найти в [этом репозитории](https://codeberg.org/OverLessArtem/ayugram-template-void)
-
-### EPM
-
-`epm play ayugram`
-
-### Fedora
-
-Из репозитория [RPM Fusion](https://admin.rpmfusion.org/pkgdb/package/free/ayugram-desktop/).
-
-```bash
-dnf install ayugram-desktop
-```
-
-### Любой другой Линукс дистрибутив
-
-Flatpak: https://github.com/0FL01/AyuGramDesktop-flatpak
-
-Или следуйте [официальному руководству](https://github.com/AyuGram/AyuGramDesktop/blob/dev/docs/building-linux.md).
-
-### Примечания для Windows
-
-Убедитесь что у вас присутствуют эти зависимости:
-
-- C++ MFC latest (x86 & x64)
-- C++ ATL latest (x86 & x64)
-- последний Windows 11 SDK
-
-## Пожертвования
-
-Вам нравится использовать **AyuGram**? Оставьте нам чаевые!
-
-[Здесь доступные варианты.](https://docs.ayugram.one/donate/)
-
-## Использованные материалы
-
-### Телеграм клиенты
+SleepyGram основан на:
 
 - [Telegram Desktop](https://github.com/telegramdesktop/tdesktop)
-- [Kotatogram](https://github.com/kotatogram/kotatogram-desktop)
-- [64Gram](https://github.com/TDesktop-x64/tdesktop)
-- [Forkgram](https://github.com/forkgram/tdesktop)
-
-### Использованные библиотеки
-
-- [JSON for Modern C++](https://github.com/nlohmann/json)
-- [SQLite](https://github.com/sqlite/sqlite)
-- [sqlite_orm](https://github.com/fnc12/sqlite_orm)
-
-### Иконки
-
-- [Solar Icon Set](https://www.figma.com/community/file/1166831539721848736)
-
-### Боты
-
-- [TelegramDB](https://t.me/tgdatabase) для получения юзернейма по ID (до закрытия бесплатной версии 2 апреля 2026)
+- [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop)
