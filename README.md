@@ -2,6 +2,12 @@
 
 SleepyGram Desktop is a Telegram Desktop fork based on Telegram Desktop 6.8.2 stable with the extended feature set kept in place.
 
+## Why SleepyGram exists
+
+SleepyGram exists because AyuGram updates have been slow, user ideas from issues have not been actively supported, and the original project appears to have stalled. This fork is meant to keep the AyuGram feature set moving on top of current Telegram Desktop releases.
+
+We will be glad to see you among SleepyGram users.
+
 ## Features
 
 - Full ghost mode
