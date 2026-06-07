@@ -20,7 +20,7 @@ project(Telegram
     LANGUAGES C CXX
     VERSION ${desktop_app_version_cmake}
     DESCRIPTION "SleepyGram Desktop"
-    HOMEPAGE_URL "https://github.com/slpkbt/AyuGramDesktop"
+    HOMEPAGE_URL "https://github.com/slpkbt/SleepyGram"
 )
 
 if (APPLE)

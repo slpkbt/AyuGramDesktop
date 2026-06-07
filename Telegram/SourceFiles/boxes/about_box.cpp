@@ -41,11 +41,11 @@ rpl::producer<TextWithEntities> Text() {
 		lt_gpl_link,
 		rpl::single(Ui::Text::Link(
 			"GNU GPL",
-			"https://github.com/slpkbt/AyuGramDesktop/blob/dev/LICENSE")),
+			"https://github.com/slpkbt/SleepyGram/blob/dev/LICENSE")),
 		lt_github_link,
 		rpl::single(Ui::Text::Link(
 			"GitHub",
-			"https://github.com/slpkbt/AyuGramDesktop")),
+			"https://github.com/slpkbt/SleepyGram")),
 		tr::marked);
 }
 
@@ -91,7 +91,7 @@ void AboutBox(not_null<Ui::GenericBox*> box, Window::SessionController*) {
 		[box]
 		{
 			box->closeBox();
-			File::OpenUrl(u"https://github.com/slpkbt/AyuGramDesktop"_q);
+			File::OpenUrl(u"https://github.com/slpkbt/SleepyGram"_q);
 		});
 
 	box->setWidth(st::aboutWidth);

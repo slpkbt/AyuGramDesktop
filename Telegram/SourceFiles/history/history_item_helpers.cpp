@@ -1335,7 +1335,7 @@ void CheckPollVoteNotificationSchedule(
 }
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
-	const auto siteLink = u"https://github.com/slpkbt/AyuGramDesktop/releases"_q;
+	const auto siteLink = u"https://github.com/slpkbt/SleepyGram/releases"_q;
 	auto result = TextWithEntities{
 		tr::lng_message_unsupported(tr::now, lt_link, siteLink).replace("Telegram", "SleepyGram")
 	};

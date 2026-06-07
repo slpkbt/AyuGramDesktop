@@ -1,7 +1,7 @@
 #define MyAppShortName "SleepyGram"
 #define MyAppName "SleepyGram Desktop"
 #define MyAppPublisher "SleepyGram"
-#define MyAppURL "https://github.com/slpkbt/AyuGramDesktop"
+#define MyAppURL "https://github.com/slpkbt/SleepyGram"
 #define MyAppExeName "SleepyGram.exe"
 #define MyAppId "09F8EFBD-99A0-4326-9A2F-2694574B75CB"
 #define CurrentYear GetDateTimeString('yyyy','','')
