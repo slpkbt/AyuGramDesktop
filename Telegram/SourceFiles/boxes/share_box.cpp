@@ -1920,10 +1920,10 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					}
 				}
 			};
-			for (auto offset = 0; offset < mtpMsgIds.size();
+			for (auto offset = qsizetype(0); offset < mtpMsgIds.size();
 					offset += kForwardMessagesPerRequest) {
 				const auto count = std::min(
-					kForwardMessagesPerRequest,
+					qsizetype(kForwardMessagesPerRequest),
 					mtpMsgIds.size() - offset);
 				const auto batchIds = mtpMsgIds.mid(offset, count);
 				const auto starsPaid = std::min(
@@ -1938,7 +1938,8 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					threadHistory,
 					FullReplyTo{ .topicRootId = topicRootId },
 					uint64(0),
-					[=](not_null<History*> history, FullReplyTo replyTo) {
+					[=](not_null<History*> history, FullReplyTo replyTo)
+					-> Data::Histories::PreparedMessage {
 						return buildMessage(
 							batchIds,
 							starsPaid,
