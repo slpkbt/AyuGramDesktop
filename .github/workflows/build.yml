@@ -60,6 +60,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Patch bundled dispatch
+        run: |
+          perl -0pi -e 's@return dmn->dmn_events & ~dmn->dmn_disarmed_events;@return dmn->dmn_events & ~(uint32_t)dmn->dmn_disarmed_events;@' Telegram/ThirdParty/dispatch/src/event/event_epoll.c
+          grep -q 'return dmn->dmn_events & ~(uint32_t)dmn->dmn_disarmed_events;' Telegram/ThirdParty/dispatch/src/event/event_epoll.c
+
       - name: Prepare Dockerfile
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
@@ -109,7 +114,7 @@ jobs:
               -D CMAKE_CONFIGURATION_TYPES=Release \
               -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
               -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
-              -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+              -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
               -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
 
       - name: Package
@@ -172,7 +177,7 @@ jobs:
             -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
             -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH" \
-            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
           cmake --build ../out --config Release --parallel
 
@@ -272,7 +277,7 @@ jobs:
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
             -D CMAKE_CONFIGURATION_TYPES=Release ^
-            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON ^
             -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=
 
